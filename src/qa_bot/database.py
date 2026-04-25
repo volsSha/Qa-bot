@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -13,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from qa_bot.config import Settings
 from qa_bot.db_models import Base, Page, ScanResult, Site
-from qa_bot.models import CheckResult, LLMEvaluation, ScanReport
+from qa_bot.models import ScanReport
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +96,9 @@ class Database:
         domain = parsed.netloc
         path = parsed.path or "/"
 
-        try:
-            site = await self.upsert_site(domain)
-            page = await self.upsert_page(site.id, report.url, path)
-            await self.save_scan(page.id, report)
-        except Exception:
-            logger.exception("Failed to persist scan for %s", report.url)
+        site = await self.upsert_site(domain)
+        page = await self.upsert_page(site.id, report.url, path)
+        await self.save_scan(page.id, report)
 
     async def get_sites(self) -> list[dict[str, Any]]:
         async with self._async_session_factory() as session:

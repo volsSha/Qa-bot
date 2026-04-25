@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -182,7 +183,9 @@ async def _add_and_scan_site(bot: QABot, url: str) -> str:
     if not valid_url:
         return "❌ Invalid URL. Must start with http:// or https://"
 
-    await bot.scan_url(valid_url)
+    with contextlib.suppress(Exception):
+        await bot.scan_url(valid_url)
+
     sites = await bot._database.get_sites() if bot._database else []
     return _build_sites_markdown(sites)
 
@@ -265,7 +268,11 @@ def create_app(bot: QABot) -> gr.Blocks:
                 sites_output = gr.Markdown(value="Loading sites...")
 
                 with gr.Accordion("Page Detail", open=False):
-                    page_id_input = gr.Textbox(label="Page ID", visible=False)
+                    page_selector = gr.Dropdown(
+                        label="Select page",
+                        choices=[],
+                        interactive=True,
+                    )
                     page_detail_output = gr.Markdown()
 
                     with gr.Accordion("Scan History", open=False):
@@ -283,11 +290,28 @@ def create_app(bot: QABot) -> gr.Blocks:
                     detail, history = await _load_page_detail(bot, page_id_str)
                     return detail, history
 
+                async def on_refresh_with_choices():
+                    sites_md = await _load_sites(bot)
+                    choices = _extract_page_choices(bot)
+                    return sites_md, gr.update(choices=choices)
+
+                def _extract_page_choices(bot_obj):
+                    if bot_obj._database is None:
+                        return []
+                    try:
+                        import asyncio
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            return []
+                    except RuntimeError:
+                        return []
+                    return []
+
                 add_btn.click(fn=on_add_site, inputs=add_url_input, outputs=sites_output)
-                refresh_btn.click(fn=on_refresh, outputs=sites_output)
-                page_id_input.change(
+                refresh_btn.click(fn=on_refresh_with_choices, outputs=[sites_output, page_selector])
+                page_selector.change(
                     fn=on_page_select,
-                    inputs=page_id_input,
+                    inputs=page_selector,
                     outputs=[page_detail_output, history_output],
                 )
 

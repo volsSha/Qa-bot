@@ -13,9 +13,12 @@ async def _main() -> None:
     settings = Settings()
     database = Database(settings)
     await database.init()
-    bot = QABot(settings, database=database)
-    app = create_app(bot)
-    app.launch(server_name="0.0.0.0", server_port=7860)
+    try:
+        bot = QABot(settings, database=database)
+        app = create_app(bot)
+        app.launch(server_name="0.0.0.0", server_port=7860)
+    finally:
+        await database.close()
 
 
 def main() -> None:

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     openrouter_api_key: SecretStr
     llm_model: str = "openai/gpt-4"
-    database_url: str = "sqlite+aiosqlite:///data/qa_bot.db"
+    database_url: str = f"sqlite+aiosqlite:///{_DATA_DIR / 'qa_bot.db'}"
     page_load_timeout: int = Field(default=30, ge=5, le=120)
     max_page_size_kb: int = Field(default=5000, ge=100, le=50000)
     rate_limit_rpm: int = Field(default=10, ge=1, le=60)
