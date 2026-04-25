@@ -18,10 +18,11 @@ if TYPE_CHECKING:
 
 @ui.page("/settings")
 async def settings_page():
-    from nicegui import app
 
     create_layout(active="settings")
-    bot = app.storage.general.get("bot")
+    from qa_bot.state import bot as _bot
+
+    bot = _bot
 
     if bot is None:
         ui.label("Bot not initialized").classes("text-red-500 p-8")

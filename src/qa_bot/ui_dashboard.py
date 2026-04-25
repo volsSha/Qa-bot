@@ -186,12 +186,11 @@ async def _load_recent(bot: QABot, recent_container: ui.column) -> None:
 
 @ui.page("/")
 async def dashboard_page():
-    from nicegui import app
 
     create_layout(active="dashboard")
-    bot: QABot | None = app.storage.general.get("bot")
-    app.storage.general.get("scheduler")
+    from qa_bot.state import bot as _bot
 
+    bot = _bot
     if bot is None:
         ui.label("Bot not initialized").classes("text-red-500 p-8")
         return

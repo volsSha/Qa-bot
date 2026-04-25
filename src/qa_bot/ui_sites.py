@@ -494,11 +494,13 @@ async def _go_back_to_sites(
 
 @ui.page("/sites")
 async def sites_page():
-    from nicegui import app
 
     create_layout(active="sites")
-    bot: QABot | None = app.storage.general.get("bot")
-    scheduler: ScanScheduler | None = app.storage.general.get("scheduler")
+    from qa_bot.state import bot as _bot
+    from qa_bot.state import scheduler as _scheduler
+
+    bot = _bot
+    scheduler = _scheduler
 
     if bot is None:
         ui.label("Bot not initialized").classes("text-red-500 p-8")

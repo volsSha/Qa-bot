@@ -132,11 +132,11 @@ async def _scan(
 
 @ui.page("/scan")
 async def scan_page():
-    from nicegui import app
 
     create_layout(active="scan")
-    bot: QABot | None = app.storage.general.get("bot")
+    from qa_bot.state import bot as _bot
 
+    bot = _bot
     if bot is None:
         ui.label("Bot not initialized").classes("text-red-500 p-8")
         return

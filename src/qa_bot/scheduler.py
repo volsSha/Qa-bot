@@ -36,7 +36,9 @@ class ScanScheduler:
     _entries: dict[int, ScheduleEntry] = field(default_factory=dict)
     _locks: dict[int, asyncio.Lock] = field(default_factory=dict)
     _tasks: set[asyncio.Task] = field(default_factory=set)
-    _timer: object | None = field(default=None, repr=False)
+    _timer_running: bool = False
+    _timer_task: asyncio.Task | None = field(default=None, repr=False)
+    _timer_interval: float = 60.0
     _paused: bool = False
     _on_scan_complete: object | None = field(default=None, repr=False)
 
@@ -122,12 +124,22 @@ class ScanScheduler:
                 entry.running = False
 
     def start_timer(self, interval: float = 60.0) -> None:
-        from nicegui import ui
+        self._timer_interval = interval
+        self._timer_running = True
+        self._timer_task = asyncio.create_task(self._timer_loop())
 
-        self._timer = ui.timer(interval, self.tick)
+    async def _timer_loop(self) -> None:
+        import asyncio as _asyncio
+
+        while self._timer_running:
+            await _asyncio.sleep(self._timer_interval)
+            try:
+                await self.tick()
+            except Exception:
+                logger.exception("Scheduler tick failed")
 
     def stop_timer(self) -> None:
-        if self._timer is not None:
-
-            self._timer.cancel()
-            self._timer = None
+        self._timer_running = False
+        if self._timer_task is not None:
+            self._timer_task.cancel()
+            self._timer_task = None
