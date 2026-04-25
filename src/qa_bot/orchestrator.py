@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from qa_bot.config import Settings
 from qa_bot.fetcher import PageFetcher
@@ -16,13 +18,19 @@ from qa_bot.preprocessor import preprocess
 from qa_bot.reporter import generate_summary, save_batch_report, save_report, save_screenshot
 from qa_bot.rules import RuleEngine, has_critical_failure
 
+if TYPE_CHECKING:
+    from qa_bot.database import Database
+
+logger = logging.getLogger(__name__)
+
 
 class QABot:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, database: Database | None = None) -> None:
         self._settings = settings
         self._fetcher = PageFetcher(settings)
         self._rule_engine = RuleEngine(settings)
         self._llm_evaluator = LLMEvaluator(settings)
+        self._database = database
 
     async def scan_url(self, url: str) -> ScanReport:
         snapshot = await self._fetcher.fetch(url)
@@ -72,6 +80,11 @@ class QABot:
         if snapshot.screenshot:
             save_screenshot(url, snapshot.screenshot)
         save_report(report)
+        if self._database:
+            try:
+                await self._database.save_scan_for_url(report)
+            except Exception:
+                logger.exception("Failed to persist scan for %s", url)
         return report
 
     async def scan_urls(self, urls: list[str]) -> ScanBatch:

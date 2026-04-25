@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from qa_bot.config import Settings, ensure_data_dirs
+from qa_bot.database import Database
 from qa_bot.orchestrator import QABot
 from qa_bot.ui import create_app
 
@@ -10,7 +11,9 @@ from qa_bot.ui import create_app
 async def _main() -> None:
     ensure_data_dirs()
     settings = Settings()
-    bot = QABot(settings)
+    database = Database(settings)
+    await database.init()
+    bot = QABot(settings, database=database)
     app = create_app(bot)
     app.launch(server_name="0.0.0.0", server_port=7860)
 
