@@ -13,7 +13,6 @@ dependencies = [
     "beautifulsoup4>=4.14.3",
     "gradio>=6.13.0",
     "httpx>=0.28.1",
-    "litellm>=1.83.0",
     "lxml>=6.1.0",
     "openrouter>=0.9.1",
     "passlib[bcrypt]>=1.7.4",
