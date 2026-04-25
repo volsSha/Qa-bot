@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 
@@ -215,3 +215,98 @@ class Database:
                 ),
                 "scan_count": len(page.scan_results),
             }
+
+    async def get_health_stats(self) -> dict[str, int]:
+        async with self._async_session_factory() as session:
+            stmt = select(Site).options(
+                selectinload(Site.pages).selectinload(Page.scan_results)
+            )
+            result = await session.execute(stmt)
+            sites = result.scalars().unique().all()
+            stats = {"total": 0, "healthy": 0, "degraded": 0, "broken": 0, "not_scanned": 0}
+            for site in sites:
+                for page in site.pages:
+                    stats["total"] += 1
+                    if page.scan_results:
+                        latest = page.scan_results[0]
+                        s = latest.overall_status
+                        if s in stats:
+                            stats[s] += 1
+                        else:
+                            stats["not_scanned"] += 1
+                    else:
+                        stats["not_scanned"] += 1
+            return stats
+
+    async def get_scan_trend(self, days: int = 30) -> list[dict[str, Any]]:
+        from datetime import timedelta
+
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        async with self._async_session_factory() as session:
+            stmt = (
+                select(
+                    func.date(ScanResult.scanned_at).label("scan_date"),
+                    func.avg(ScanResult.health_score).label("avg_score"),
+                    func.count(ScanResult.id).label("scan_count"),
+                )
+                .where(ScanResult.scanned_at >= cutoff)
+                .group_by(func.date(ScanResult.scanned_at))
+                .order_by(func.date(ScanResult.scanned_at))
+            )
+            result = await session.execute(stmt)
+            return [
+                {
+                    "date": str(row.scan_date),
+                    "avg_score": round(float(row.avg_score), 1),
+                    "scan_count": row.scan_count,
+                }
+                for row in result
+            ]
+
+    async def get_recent_scans(self, limit: int = 10) -> list[dict[str, Any]]:
+        async with self._async_session_factory() as session:
+            stmt = (
+                select(ScanResult, Page.url)
+                .join(Page, ScanResult.page_id == Page.id)
+                .order_by(ScanResult.scanned_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [
+                {
+                    "id": scan.id,
+                    "url": url,
+                    "overall_status": scan.overall_status,
+                    "health_score": scan.health_score,
+                    "scanned_at": scan.scanned_at,
+                }
+                for scan, url in result.all()
+            ]
+
+    async def delete_site(self, site_id: int) -> str | None:
+        async with self._async_session_factory() as session:
+            stmt = select(Site).where(Site.id == site_id)
+            result = await session.execute(stmt)
+            site = result.scalar_one_or_none()
+            if site is None:
+                return None
+            domain = site.domain
+            await session.delete(site)
+            await session.commit()
+            return domain
+
+    async def get_page_health_history(
+        self, page_id: int, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        async with self._async_session_factory() as session:
+            stmt = (
+                select(ScanResult.health_score, ScanResult.scanned_at)
+                .where(ScanResult.page_id == page_id)
+                .order_by(ScanResult.scanned_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [
+                {"score": row.health_score, "scanned_at": row.scanned_at}
+                for row in result
+            ]
