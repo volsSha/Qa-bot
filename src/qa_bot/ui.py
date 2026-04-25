@@ -4,7 +4,7 @@ import contextlib
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-import gradio as gr
+from nicegui import ui
 
 from qa_bot.orchestrator import QABot
 from qa_bot.reporter import format_batch_summary, format_report_markdown
@@ -13,11 +13,23 @@ if TYPE_CHECKING:
     pass
 
 
-_STATUS_BADGE: dict[str | None, str] = {
-    "healthy": "🟢 Healthy",
-    "degraded": "🟡 Degraded",
-    "broken": "🔴 Broken",
-    None: "⬜ Not scanned",
+_STATUS_BADGE: dict[str | None, tuple[str, str]] = {
+    "healthy": (
+        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        "Healthy",
+    ),
+    "degraded": (
+        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+        "Degraded",
+    ),
+    "broken": (
+        "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+        "Broken",
+    ),
+    None: (
+        "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300",
+        "Not scanned",
+    ),
 }
 
 
@@ -38,294 +50,451 @@ def _validate_single_url(text: str) -> str | None:
     return None
 
 
-def _format_score(score: float | None) -> str:
+def _status_badge(status: str | None) -> str:
+    color_classes, label = _STATUS_BADGE.get(status, _STATUS_BADGE[None])
+    return (
+        f'<span class="{color_classes} px-2 py-0.5 rounded-full text-xs">'
+        f"{label}</span>"
+    )
+
+
+def _score_badge(score: float | None) -> str:
     if score is None:
-        return "—"
-    return f"{score:.0f}"
-
-
-def _build_sites_markdown(sites: list[dict]) -> str:
-    if not sites:
-        return "### No sites tracked yet\n\nAdd a site URL to start monitoring."
-
-    lines: list[str] = []
-    for site in sites:
-        domain = site["domain"]
-        label = site.get("label")
-        header = f"**{domain}**" + (f" ({label})" if label else "")
-        lines.append(f"#### {header}\n")
-
-        pages = site.get("pages", [])
-        if not pages:
-            lines.append("_No pages tracked._\n")
-            continue
-
-        lines.append("| Path | Status | Score | Scans | Last Scan |")
-        lines.append("|------|--------|-------|-------|-----------|")
-        for p in pages:
-            status_badge = _STATUS_BADGE.get(p.get("latest_status"), "⬜ Unknown")
-            score = _format_score(p.get("latest_score"))
-            scan_count = p.get("scan_count", 0)
-            scanned_at = (
-                p["latest_scanned_at"].strftime("%Y-%m-%d %H:%M")
-                if p.get("latest_scanned_at")
-                else "—"
-            )
-            path = p.get("path") or p.get("url", "—")
-            lines.append(f"| {path} | {status_badge} | {score} | {scan_count} | {scanned_at} |")
-
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def _build_page_detail_markdown(page_data: dict | None) -> str:
-    if page_data is None:
-        return "### Select a page to view details"
-
-    lines = [
-        f"### {page_data['url']}",
-        f"**Domain:** {page_data.get('site_domain', '—')}",
-        f"**Scans:** {page_data.get('scan_count', 0)}",
-        "",
-    ]
-
-    latest = page_data.get("latest_scan")
-    if latest is None:
-        lines.append("_No scans yet._")
-        return "\n".join(lines)
-
-    lines.append("#### Latest Scan")
-    status_val = latest["overall_status"]
-    lines.append(f"- **Status:** {_STATUS_BADGE.get(status_val, status_val)}")
-    lines.append(f"- **Score:** {latest['health_score']:.0f}")
-    lines.append(f"- **Model:** {latest.get('model_used', '—')}")
-    lines.append(f"- **Scanned at:** {latest['scanned_at'].strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append("")
-    lines.append("##### Rule Results")
-
-    rule_results = latest.get("rule_results", [])
-    if rule_results:
-        lines.append("| Check | Severity | Message |")
-        lines.append("|-------|----------|---------|")
-        for r in rule_results:
-            sev = r.get("severity", "pass")
-            if sev == "pass":
-                sev_display = "✅ Pass"
-            elif sev == "critical":
-                sev_display = "🔴 Critical"
-            elif sev == "warning":
-                sev_display = "🟡 Warning"
-            else:
-                sev_display = "i Info"
-            name = r.get("check_name", "—")
-            msg = r.get("message", "—")
-            lines.append(f"| {name} | {sev_display} | {msg} |")
+        return ""
+    if score >= 80:
+        color = "text-green-600 dark:text-green-400"
+    elif score >= 50:
+        color = "text-yellow-600 dark:text-yellow-400"
     else:
-        lines.append("_No rule results._")
-    lines.append("")
-
-    llm_eval = latest.get("llm_evaluation")
-    if llm_eval:
-        lines.append("##### LLM Evaluation")
-        findings = llm_eval.get("findings", [])
-        if findings:
-            lines.append("| Category | Passed | Confidence | Evidence |")
-            lines.append("|----------|--------|------------|----------|")
-            for f in findings:
-                passed = "✅ Yes" if f.get("passed") else "❌ No"
-                conf = f"{f.get('confidence', 0):.0%}"
-                evidence = f.get("evidence", "—")
-                lines.append(f"| {f.get('category', '—')} | {passed} | {conf} | {evidence} |")
-        else:
-            lines.append("_No findings._")
-        lines.append("")
-
-    lines.append(f"**Summary:** {latest.get('summary', '—')}")
-    return "\n".join(lines)
+        color = "text-red-600 dark:text-red-400"
+    return f'<span class="{color} font-bold">{score:.0f}</span>'
 
 
-def _build_history_markdown(history: list[dict]) -> str:
-    if not history:
-        return "_No scan history._"
+def _severity_badge(severity: str | None) -> str:
+    mapping = {
+        "pass": "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        "critical": "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+        "warning": (
+            "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+        ),
+        "info": "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+    }
+    cls = mapping.get(severity, "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200")
+    label = severity.capitalize() if severity else "?"
+    return f'<span class="{cls} px-2 py-0.5 rounded text-xs">{label}</span>'
 
-    lines = ["| Date | Status | Score | Model |", "|------|--------|-------|-------|"]
-    for h in history:
-        status_badge = _STATUS_BADGE.get(h.get("overall_status"), h.get("overall_status", "—"))
-        score = _format_score(h.get("health_score"))
-        model = h.get("model_used", "—")
-        date = h["scanned_at"].strftime("%Y-%m-%d %H:%M:%S") if h.get("scanned_at") else "—"
-        lines.append(f"| {date} | {status_badge} | {score} | {model} |")
-    return "\n".join(lines)
+
+def _plural(n: int) -> str:
+    return "s" if n != 1 else ""
 
 
 async def _scan(bot: QABot, text: str):
     urls = _parse_urls(text)
     if not urls:
-        msg = "No valid URLs provided. Enter one URL per line (must start with http:// or https://)."
-        return msg, []
+        ui.notify("No valid URLs provided", type="warning")
+        return
+
+    with scan_result_container:
+        scan_result_container.clear()
+        with scan_result_container:
+            ui.label("Scanning...").classes("text-lg")
 
     batch = await bot.scan_urls(urls)
-    summary_md = format_batch_summary(batch)
-    tabs = [(report.url, format_report_markdown(report)) for report in batch.reports]
-    return summary_md, tabs
+
+    with scan_result_container:
+        scan_result_container.clear()
+        summary_md = format_batch_summary(batch)
+        ui.markdown(summary_md)
+        for report in batch.reports:
+            with ui.expansion(report.url):
+                ui.markdown(format_report_markdown(report))
+
+    ui.notify(f"Scanned {len(batch.reports)} URLs")
 
 
-async def _load_sites(bot: QABot) -> str:
+async def _load_sites(bot: QABot):
     if bot._database is None:
-        return "### Database not configured"
+        sites_container.clear()
+        with sites_container:
+            ui.label("Database not configured")
+        return
+
     sites = await bot._database.get_sites()
-    return _build_sites_markdown(sites)
+
+    sites_container.clear()
+    with sites_container:
+        if not sites:
+            ui.label("No sites tracked yet").classes(
+                "text-gray-400 dark:text-gray-500 text-lg mt-4"
+            )
+            return
+
+        for site in sites:
+            domain = site["domain"]
+            label = site.get("label")
+            pages = site.get("pages", [])
+
+            with ui.card().classes("w-full").tight():
+                with ui.row().classes(
+                    "flex items-center justify-between w-full "
+                    "bg-gray-50 dark:bg-gray-800 px-4 py-2"
+                ):
+                    ui.label(f"Domain: {domain}").classes("text-lg font-semibold")
+                    if label:
+                        ui.label(label).classes(
+                            "text-gray-500 dark:text-gray-400 text-sm ml-2"
+                        )
+                    page_count = len(pages)
+                    ui.badge(
+                        f"{page_count} page{_plural(page_count)}",
+                        color="blue",
+                    ).props("color=blue")
+
+                if not pages:
+                    continue
+
+                with ui.row().classes("gap-2 flex-wrap w-full"):
+                    for p in pages:
+                        _render_page_card(bot, p)
 
 
-async def _add_and_scan_site(bot: QABot, url: str) -> str:
+def _render_page_card(bot: QABot, p: dict):
+    page_id = p["id"]
+    status = p.get("latest_status")
+    score = p.get("latest_score")
+    scan_count = p.get("scan_count", 0)
+    path = p.get("path") or p.get("url", "—")
+
+    card_classes = (
+        "cursor-pointer hover:shadow-md transition-shadow "
+        "min-w-[200px] max-w-[280px]"
+    )
+    with ui.button(on_click=lambda pid=page_id: show_page_detail(pid)).props(
+        "flat no-caps padding-none"
+    ).classes(card_classes), ui.card().classes("w-full").tight():
+        with ui.row().classes("items-center justify-between"):
+            ui.label(path).classes("font-medium text-sm truncate")
+            ui.button(
+                icon="delete",
+                on_click=lambda pid=page_id: _delete_page(bot, pid),
+            ).props("flat round dense color=negative size=sm").classes(
+                "w-6 h-6"
+            ).on("click.stop")
+        with ui.row().classes("items-center gap-2 mt-1"):
+            ui.html(_status_badge(status))
+            ui.html(_score_badge(score))
+            ui.label(f"{scan_count} scan{_plural(scan_count)}").classes(
+                "text-xs text-gray-400 dark:text-gray-500"
+            )
+
+
+async def _delete_page(bot: QABot, page_id: int):
+    if bot._database is None:
+        return
+
+    try:
+        detail = await bot._database.get_page_with_latest_scan(page_id)
+        if detail:
+            from sqlalchemy import delete as sa_delete
+
+            from qa_bot.db_models import Page, ScanResult
+
+            async with bot._database._async_session_factory() as session:
+                await session.execute(
+                    sa_delete(ScanResult).where(ScanResult.page_id == page_id)
+                )
+                await session.execute(
+                    sa_delete(Page).where(Page.id == page_id)
+                )
+                await session.commit()
+
+            label = detail.get("url", f"Page #{page_id}")
+            ui.notify(f"Deleted {label}", type="info")
+            await _load_sites(bot)
+        else:
+            ui.notify("Page not found", type="warning")
+    except Exception as e:
+        ui.notify(f"Failed to delete: {e}", type="negative")
+
+
+async def _add_and_scan_site(bot: QABot, url_input):
+    url = url_input.value.strip()
+    if not url:
+        ui.notify("Enter a URL", type="warning")
+        return
+
     valid_url = _validate_single_url(url)
     if not valid_url:
-        return "❌ Invalid URL. Must start with http:// or https://"
+        ui.notify("Invalid URL. Must start with http:// or https://", type="warning")
+        return
+
+    url_input.set_value("")
+    ui.notify(f"Scanning {valid_url}...", type="info")
 
     with contextlib.suppress(Exception):
         await bot.scan_url(valid_url)
 
-    sites = await bot._database.get_sites() if bot._database else []
-    return _build_sites_markdown(sites)
+    await _load_sites(bot)
+    ui.notify(f"Added {valid_url}")
 
 
-async def _refresh_sites(bot: QABot) -> str:
-    return await _load_sites(bot)
+bot_instance: QABot | None = None
 
 
-async def _load_page_detail(bot: QABot, page_id_str: str) -> tuple[str, str]:
-    if not page_id_str or not page_id_str.strip():
-        return "### Select a page to view details", ""
-
-    try:
-        page_id = int(page_id_str.strip().split(":")[0].strip())
-    except (ValueError, IndexError):
-        return "### Invalid page ID", ""
-
-    if bot._database is None:
-        return "### Database not configured", ""
-
-    page_data = await bot._database.get_page_with_latest_scan(page_id)
-    detail_md = _build_page_detail_markdown(page_data)
-
-    history = []
-    if page_data:
-        history = await bot._database.get_scan_history(page_id, limit=20)
-    history_md = _build_history_markdown(history)
-
-    return detail_md, history_md
+async def show_page_detail(page_id: int):
+    if bot_instance is None:
+        return
+    sites_container.clear()
+    await _load_page_detail(bot_instance, page_id)
 
 
-def create_app(bot: QABot) -> gr.Blocks:
-    with gr.Blocks(title="QA Bot") as app:
-        gr.Markdown("# QA Bot - Web Page Health Monitor")
+async def _load_page_detail(bot: QABot, page_id: int):
+    page_detail_container.clear()
+    with page_detail_container:
+        if bot._database is None:
+            ui.label("Database not configured")
+            return
 
-        with gr.Tabs() as _main_tabs:
-            with gr.Tab("Scan"):
-                url_input = gr.Textbox(
-                    label="URLs to scan",
-                    lines=5,
-                    placeholder="Enter URLs, one per line\nhttps://example.com\nhttps://another-site.com",
+        detail = await bot._database.get_page_with_latest_scan(page_id)
+        if detail is None:
+            ui.label("Page not found")
+            return
+
+        with ui.card().classes("w-full"):
+            with ui.row().classes(
+                "flex items-center justify-between "
+                "bg-gray-50 dark:bg-gray-800 px-4 py-2"
+            ):
+                ui.label(detail["url"]).classes(
+                    "text-lg font-semibold truncate"
                 )
-                run_btn = gr.Button("Run Scan", variant="primary")
-                summary_output = gr.Markdown(label="Batch Summary")
-                with gr.Tabs(visible=False) as report_tabs:
-                    pass
+                ui.button(
+                    "Back", icon="arrow_back",
+                    on_click=_go_back_to_sites,
+                ).props("flat color=primary")
 
-                dynamic_tabs: list[gr.Tab] = []
+            ui.label(f"Domain: {detail.get('site_domain', '—')}").classes(
+                "text-sm text-gray-500 dark:text-gray-400"
+            )
+            ui.label(f"Total scans: {detail.get('scan_count', 0)}").classes(
+                "text-sm text-gray-500 dark:text-gray-400"
+            )
 
-                async def run_scan(text: str):
-                    summary_md, tabs = await _scan(bot, text)
-                    if not tabs:
-                        return gr.update(value=summary_md), gr.update(visible=False)
+            latest = detail.get("latest_scan")
+            if latest:
+                _render_latest_scan(bot, latest)
+            else:
+                ui.label("No scans yet.").classes(
+                    "text-gray-400 dark:text-gray-500"
+                )
 
-                    report_tabs.visible = True
-                    for t in dynamic_tabs:
-                        t.visible = False
-                    dynamic_tabs.clear()
+            history = []
+            if bot._database:
+                history = await bot._database.get_scan_history(
+                    page_id, limit=20
+                )
+            if history:
+                _render_scan_history(history)
 
-                    for label, content in tabs:
-                        with report_tabs:
-                            tab = gr.Tab(label=label, visible=True)
-                            with tab:
-                                gr.Markdown(value=content)
-                            dynamic_tabs.append(tab)
 
-                    return gr.update(value=summary_md), gr.update(visible=True)
+def _render_latest_scan(bot: QABot, latest: dict):
+    with ui.separator():
+        ui.label("Latest Scan").classes("text-base font-semibold mt-2")
+        with ui.row().classes("items-center gap-3"):
+            ui.html(_status_badge(latest["overall_status"]))
+            score_html = (
+                f'<span class="text-xl font-bold">'
+                f'{latest["health_score"]:.0f}</span>'
+            )
+            ui.html(score_html)
+            model = latest.get("model_used", "—")
+            ui.label(f"Model: {model}").classes(
+                "text-sm text-gray-500 dark:text-gray-400"
+            )
+        ts = latest["scanned_at"].strftime("%Y-%m-%d %H:%M:%S")
+        ui.label(f"Scanned: {ts}").classes(
+            "text-sm text-gray-500 dark:text-gray-400"
+        )
 
-                run_btn.click(fn=run_scan, inputs=url_input, outputs=[summary_output, report_tabs])
-
-            with gr.Tab("Sites"):
-                with gr.Row():
-                    add_url_input = gr.Textbox(
-                        label="Add Site URL",
-                        placeholder="https://example.com",
-                        scale=4,
+    rule_results = latest.get("rule_results", [])
+    if rule_results:
+        with ui.expansion("Rule Results"):
+            with ui.row().classes(
+                "w-full gap-0 border-b border-gray-200 dark:border-gray-700 "
+                "text-xs font-semibold text-gray-500 dark:text-gray-400"
+            ):
+                ui.label("Check").classes("w-[120px] px-2 py-1")
+                ui.label("Severity").classes("w-[100px] px-2 py-1 text-center")
+                ui.label("Message").classes("flex-1 px-2 py-1")
+            for r in rule_results:
+                with ui.row().classes(
+                    "w-full gap-0 border-b border-gray-100 "
+                    "dark:border-gray-700/50 text-sm"
+                ):
+                    ui.label(r.get("check_name", "—")).classes(
+                        "w-[120px] px-2 py-1 font-mono text-xs"
                     )
-                    add_btn = gr.Button("Add & Scan", variant="primary", scale=1)
-
-                sites_output = gr.Markdown(value="Loading sites...")
-
-                with gr.Accordion("Page Detail", open=False):
-                    page_selector = gr.Dropdown(
-                        label="Select page",
-                        choices=[],
-                        interactive=True,
+                    ui.html(_severity_badge(r.get("severity"))).classes(
+                        "w-[100px] px-2 py-1 text-center"
                     )
-                    page_detail_output = gr.Markdown()
+                    ui.label(r.get("message", "—")).classes(
+                        "flex-1 px-2 py-1"
+                    )
+    else:
+        ui.label("No rule results.").classes("text-gray-400 dark:text-gray-500")
 
-                    with gr.Accordion("Scan History", open=False):
-                        history_output = gr.Markdown()
-
-                refresh_btn = gr.Button("🔄 Refresh Sites")
-
-                async def on_add_site(url: str):
-                    return await _add_and_scan_site(bot, url)
-
-                async def on_refresh():
-                    return await _refresh_sites(bot)
-
-                async def on_page_select(page_id_str: str):
-                    detail, history = await _load_page_detail(bot, page_id_str)
-                    return detail, history
-
-                async def on_refresh_with_choices():
-                    sites_md = await _load_sites(bot)
-                    choices = await _get_page_choices(bot)
-                    return sites_md, gr.update(choices=choices)
-
-                async def on_add_with_choices(url: str):
-                    sites_md = await _add_and_scan_site(bot, url)
-                    choices = await _get_page_choices(bot)
-                    return sites_md, gr.update(choices=choices)
-
-                async def _get_page_choices(bot_obj):
-                    if bot_obj._database is None:
-                        return []
-                    sites = await bot_obj._database.get_sites()
-                    choices = []
-                    for site in sites:
-                        for page in site.get("pages", []):
-                            label = f"{site['domain']}{page.get('path', '/')}"
-                            choices.append(f"{page['id']}: {label}")
-                    return choices
-
-                add_btn.click(
-                    fn=on_add_with_choices,
-                    inputs=add_url_input,
-                    outputs=[sites_output, page_selector],
-                )
-                refresh_btn.click(
-                    fn=on_refresh_with_choices,
-                    outputs=[sites_output, page_selector],
-                )
-                page_selector.change(
-                    fn=on_page_select,
-                    inputs=page_selector,
-                    outputs=[page_detail_output, history_output],
+    llm_eval = latest.get("llm_evaluation")
+    if llm_eval:
+        with ui.expansion("LLM Evaluation"):
+            findings = llm_eval.get("findings", [])
+            if findings:
+                with ui.row().classes(
+                    "w-full gap-0 border-b border-gray-200 dark:border-gray-700 "
+                    "text-xs font-semibold text-gray-500 dark:text-gray-400"
+                ):
+                    ui.label("Category").classes("w-[120px] px-2 py-1")
+                    ui.label("Passed").classes(
+                        "w-[80px] px-2 py-1 text-center"
+                    )
+                    ui.label("Confidence").classes(
+                        "w-[100px] px-2 py-1 text-center"
+                    )
+                    ui.label("Evidence").classes("flex-1 px-2 py-1")
+                for f in findings:
+                    with ui.row().classes(
+                        "w-full gap-0 border-b border-gray-100 "
+                        "dark:border-gray-700/50 text-sm"
+                    ):
+                        ui.label(f.get("category", "—")).classes(
+                            "w-[120px] px-2 py-1"
+                        )
+                        passed = f.get("passed", False)
+                        ui.label("Yes" if passed else "No").classes(
+                            "w-[80px] px-2 py-1 text-center "
+                            + (
+                                "text-green-600 dark:text-green-400"
+                                if passed
+                                else "text-red-600 dark:text-red-400"
+                            )
+                        )
+                        ui.label(f"{f.get('confidence', 0):.0%}").classes(
+                            "w-[100px] px-2 py-1 text-center"
+                        )
+                        ui.label(f.get("evidence", "—")).classes(
+                            "flex-1 px-2 py-1"
+                        )
+            else:
+                ui.label("No findings.").classes(
+                    "text-gray-400 dark:text-gray-500"
                 )
 
-                app.load(fn=on_refresh, outputs=sites_output)
+    summary = latest.get("summary", "")
+    if summary:
+        ui.label(summary).classes(
+            "text-sm text-gray-600 dark:text-gray-400 mt-2 italic"
+        )
 
-    return app
+
+def _render_scan_history(history: list[dict]):
+    with ui.expansion("Scan History"):
+        with ui.row().classes(
+            "w-full gap-0 border-b border-gray-200 dark:border-gray-700 "
+            "text-xs font-semibold text-gray-500 dark:text-gray-400"
+        ):
+            ui.label("Date").classes("w-[160px] px-2 py-1")
+            ui.label("Status").classes("w-[100px] px-2 py-1 text-center")
+            ui.label("Score").classes("w-[60px] px-2 py-1 text-center")
+            ui.label("Model").classes("flex-1 px-2 py-1")
+        for h in history:
+            with ui.row().classes(
+                "w-full gap-0 border-b border-gray-100 "
+                "dark:border-gray-700/50 text-sm"
+            ):
+                date_str = (
+                    h["scanned_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    if h.get("scanned_at")
+                    else "—"
+                )
+                ui.label(date_str).classes("w-[160px] px-2 py-1 text-xs")
+                ui.html(_status_badge(h.get("overall_status"))).classes(
+                    "w-[100px] px-2 py-1 text-center"
+                )
+                ui.label(f"{h.get('health_score', 0):.0f}").classes(
+                    "w-[60px] px-2 py-1 text-center font-bold"
+                )
+                ui.label(h.get("model_used", "—")).classes(
+                    "flex-1 px-2 py-1"
+                )
+
+
+async def _go_back_to_sites():
+    _show_sites_view()
+    if bot_instance:
+        await _load_sites(bot_instance)
+
+
+def _show_sites_view():
+    page_detail_container.clear()
+
+
+scan_result_container: ui.column
+sites_container: ui.column
+page_detail_container: ui.column
+
+
+def create_app(bot: QABot) -> None:
+    global scan_result_container, sites_container, page_detail_container
+    global bot_instance
+
+    bot_instance = bot
+    dark_mode = ui.dark_mode()
+
+    with ui.row().classes("w-full items-center justify-between"):
+        ui.label("QA Bot - Web Page Health Monitor").classes(
+            "text-2xl font-bold"
+        )
+        ui.button(icon="dark_mode", on_click=dark_mode.toggle).props(
+            "flat round size=sm"
+        )
+
+    with ui.tabs() as _tabs:
+        scan_tab = ui.tab("Scan")
+        sites_tab = ui.tab("Sites")
+
+    with ui.tab_panels(_tabs, value=scan_tab).classes("w-full"):
+        with ui.tab_panel(scan_tab):
+            url_input = ui.textarea(
+                placeholder=(
+                    "Enter URLs, one per line\n"
+                    "https://example.com\n"
+                    "https://another-site.com"
+                ),
+            ).classes("w-full")
+            scan_btn = ui.button(
+                "Run Scan", icon="search", on_click=lambda: _scan(bot, url_input.value)
+            )
+            scan_btn.props("color=primary")
+            scan_result_container = ui.column()
+
+        with ui.tab_panel(sites_tab):
+            with ui.row().classes("items-center gap-2 w-full"):
+                add_url_input = ui.input(
+                    placeholder="https://example.com",
+                ).classes("flex-1")
+                add_btn = ui.button(
+                    "Add & Scan",
+                    icon="add",
+                    on_click=lambda: _add_and_scan_site(bot, add_url_input),
+                )
+                add_btn.props("color=primary")
+                ui.space()
+                refresh_btn = ui.button(
+                    icon="refresh",
+                    on_click=lambda: _load_sites(bot),
+                )
+                refresh_btn.props("flat round")
+
+            sites_container = ui.column().classes("w-full")
+            page_detail_container = ui.column().classes("w-full")
+
+    ui.timer(0.1, lambda: _load_sites(bot), once=True)
