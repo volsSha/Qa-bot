@@ -283,6 +283,18 @@ class Database:
                 for scan, url in result.all()
             ]
 
+    async def delete_site(self, site_id: int) -> str | None:
+        async with self._async_session_factory() as session:
+            stmt = select(Site).where(Site.id == site_id)
+            result = await session.execute(stmt)
+            site = result.scalar_one_or_none()
+            if site is None:
+                return None
+            domain = site.domain
+            await session.delete(site)
+            await session.commit()
+            return domain
+
     async def get_page_health_history(
         self, page_id: int, limit: int = 10
     ) -> list[dict[str, Any]]:

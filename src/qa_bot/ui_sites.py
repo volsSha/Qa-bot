@@ -71,11 +71,27 @@ async def _load_sites(
                             ui.label(label).classes(
                                 "text-gray-500 dark:text-gray-400 text-sm"
                             )
-                    page_count = len(pages)
-                    ui.badge(
-                        f"{page_count} page{plural(page_count)}",
-                        color="blue",
-                    ).props("color=blue")
+                    with ui.row().classes("items-center gap-1"):
+                        page_count = len(pages)
+                        ui.badge(
+                            f"{page_count} page{plural(page_count)}",
+                            color="blue",
+                        ).props("color=blue")
+                        def _make_delete_handler(
+                            _sid=site["id"],
+                            _d=domain,
+                            _sc=sites_container,
+                            _pd=page_detail_container,
+                        ):
+                            return lambda: _confirm_delete_site(
+                                bot, scheduler, _sid, _d, _sc, _pd
+                            )
+
+                        with ui.button(
+                            icon="delete",
+                            on_click=_make_delete_handler(),
+                        ).props("flat round dense size=sm").classes("text-red-400"):
+                            ui.tooltip("Delete site")
 
                 if not pages:
                     continue
@@ -442,6 +458,61 @@ async def _rescan_all(
     await bot.scan_urls(urls)
     await _load_sites(bot, scheduler, sites_container, page_detail_container)
     ui.notify("Rescan complete", type="positive")
+
+
+async def _confirm_delete_site(
+    bot: QABot,
+    scheduler: ScanScheduler | None,
+    site_id: int,
+    domain: str,
+    sites_container: ui.column,
+    page_detail_container: ui.column,
+) -> None:
+    with ui.dialog() as dialog, ui.card():
+        ui.label(f"Delete {domain}?").classes("text-lg font-semibold")
+        ui.label(
+            "All pages and scan results for this site will be permanently removed."
+        ).classes("text-sm text-gray-500 dark:text-gray-400")
+        with ui.row().classes("justify-end w-full gap-2 mt-4"):
+            ui.button("Cancel", on_click=dialog.close).props("flat")
+            ui.button("Delete", on_click=lambda: [
+                dialog.close(),
+                _delete_site(bot, scheduler, site_id, sites_container, page_detail_container),
+            ]).props("color=negative")
+
+    dialog.open()
+
+
+async def _delete_site(
+    bot: QABot,
+    scheduler: ScanScheduler | None,
+    site_id: int,
+    sites_container: ui.column,
+    page_detail_container: ui.column,
+) -> None:
+    if bot._database is None:
+        return
+    try:
+        pages = []
+        sites = await bot._database.get_sites()
+        for site in sites:
+            if site["id"] == site_id:
+                pages = site.get("pages", [])
+                break
+
+        domain = await bot._database.delete_site(site_id)
+        if domain is None:
+            ui.notify("Site not found", type="warning")
+            return
+
+        if scheduler:
+            for p in pages:
+                scheduler.unschedule(p["id"])
+
+        ui.notify(f"Deleted {domain}", type="info")
+        await _load_sites(bot, scheduler, sites_container, page_detail_container)
+    except Exception:
+        ui.notify("Failed to delete site", type="negative")
 
 
 async def _delete_page(
