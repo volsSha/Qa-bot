@@ -13,7 +13,7 @@ from qa_bot.models import (
     Severity,
 )
 from qa_bot.preprocessor import preprocess
-from qa_bot.reporter import generate_summary
+from qa_bot.reporter import generate_summary, save_batch_report, save_report, save_screenshot
 from qa_bot.rules import RuleEngine, has_critical_failure
 
 
@@ -60,7 +60,7 @@ class QABot:
             rule_results=rule_results,
             llm_evaluation=llm_evaluation,
         )
-        return ScanReport(
+        report = ScanReport(
             url=url,
             overall_status=overall_status,
             health_score=health_score,
@@ -69,6 +69,10 @@ class QABot:
             summary=summary,
             scanned_at=datetime.now(UTC),
         )
+        if snapshot.screenshot:
+            save_screenshot(url, snapshot.screenshot)
+        save_report(report)
+        return report
 
     async def scan_urls(self, urls: list[str]) -> ScanBatch:
         sem = asyncio.Semaphore(self._settings.max_concurrent_scans)
@@ -78,8 +82,10 @@ class QABot:
                 return await self.scan_url(u)
 
         reports = await asyncio.gather(*[_guarded(u) for u in urls])
-        return ScanBatch(
+        batch = ScanBatch(
             urls=urls,
             reports=list(reports),
             generated_at=datetime.now(UTC),
         )
+        save_batch_report(batch)
+        return batch

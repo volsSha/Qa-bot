@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -19,6 +19,13 @@ from qa_bot.models import (
 from qa_bot.orchestrator import QABot
 
 _NOW = datetime(2026, 1, 1, 0, 0, 0)
+
+@pytest.fixture(autouse=True)
+def _mock_save(monkeypatch):
+    monkeypatch.setattr("qa_bot.orchestrator.save_screenshot", MagicMock())
+    monkeypatch.setattr("qa_bot.orchestrator.save_report", MagicMock())
+    monkeypatch.setattr("qa_bot.orchestrator.save_batch_report", MagicMock())
+
 
 _SETTINGS = Settings(
     openrouter_api_key="sk-test",

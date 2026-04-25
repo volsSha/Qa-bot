@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from qa_bot.config import Settings
+from qa_bot.config import Settings, ensure_data_dirs
 from qa_bot.orchestrator import QABot
 from qa_bot.ui import create_app
 
 
 def main() -> None:
+    ensure_data_dirs()
     settings = Settings()
     bot = QABot(settings)
     app = create_app(bot)

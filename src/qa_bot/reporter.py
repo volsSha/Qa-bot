@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
+
+from qa_bot.config import _REPORTS_DIR, _SCREENSHOTS_DIR
 from qa_bot.models import (
     OverallStatus,
     ScanBatch,
@@ -61,18 +65,11 @@ def generate_summary(
 
 def format_report_markdown(report: ScanReport) -> str:
     badge = _STATUS_BADGE[report.overall_status]
-    lines = [
-        f"# QA Report: {report.url}",
-        f"**Status:** {badge}  ",
-        f"**Health Score:** {report.health_score:.0f}/100  ",
-        f"**Scanned at:** {report.scanned_at:%Y-%m-%d %H:%M:%S}  ",
-        "",
-    ]
+    lines = [f"# QA Report: {report.url}", f"**Status:** {badge}  ",
+             f"**Health Score:** {report.health_score:.0f}/100  ",
+             f"**Scanned at:** {report.scanned_at:%Y-%m-%d %H:%M:%S}  ", "", "## Rule Check Results", "",
+             "| Check | Severity | Message |", "|-------|----------|---------|"]
 
-    lines.append("## Rule Check Results")
-    lines.append("")
-    lines.append("| Check | Severity | Message |")
-    lines.append("|-------|----------|---------|")
     for r in report.rule_results:
         icon = _SEVERITY_ICON.get(r.severity, "")
         lines.append(f"| {r.check_name} | {icon} {r.severity} | {r.message} |")
@@ -142,3 +139,35 @@ def format_batch_summary(batch: ScanBatch) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _url_to_filename(url: str) -> str:
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    host = parsed.hostname or "unknown"
+    path = parsed.path.strip("/").replace("/", "_")
+    return f"{host}{'_' + path if path else ''}"
+
+
+def save_screenshot(url: str, screenshot: bytes) -> Path:
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{_url_to_filename(url)}_{ts}.png"
+    path = _SCREENSHOTS_DIR / filename
+    path.write_bytes(screenshot)
+    return path
+
+
+def save_report(report: ScanReport) -> Path:
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{_url_to_filename(report.url)}_{ts}.json"
+    path = _REPORTS_DIR / filename
+    path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    return path
+
+
+def save_batch_report(batch: ScanBatch) -> Path:
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"batch_{ts}.json"
+    path = _REPORTS_DIR / filename
+    path.write_text(batch.model_dump_json(indent=2), encoding="utf-8")
+    return path

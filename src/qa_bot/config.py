@@ -4,6 +4,14 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent
+_DATA_DIR = _BASE_DIR / "data"
+_SCREENSHOTS_DIR = _DATA_DIR / "screenshots"
+_REPORTS_DIR = _DATA_DIR / "reports"
+
+
+def ensure_data_dirs() -> None:
+    _SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Settings(BaseSettings):

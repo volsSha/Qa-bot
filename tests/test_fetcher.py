@@ -7,7 +7,7 @@ from qa_bot.models import PageSnapshot
 
 
 def _make_settings(**overrides) -> Settings:
-    defaults = {"openrouter_api_key": "test-key"}
+    defaults = {"openrouter_api_key": "test-key", "page_load_timeout": 30}
     defaults.update(overrides)
     return Settings(**defaults)
 
