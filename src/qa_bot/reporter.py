@@ -65,10 +65,17 @@ def generate_summary(
 
 def format_report_markdown(report: ScanReport) -> str:
     badge = _STATUS_BADGE[report.overall_status]
-    lines = [f"# QA Report: {report.url}", f"**Status:** {badge}  ",
-             f"**Health Score:** {report.health_score:.0f}/100  ",
-             f"**Scanned at:** {report.scanned_at:%Y-%m-%d %H:%M:%S}  ", "", "## Rule Check Results", "",
-             "| Check | Severity | Message |", "|-------|----------|---------|"]
+    lines = [
+        f"# QA Report: {report.url}",
+        f"**Status:** {badge}  ",
+        f"**Health Score:** {report.health_score:.0f}/100  ",
+        f"**Scanned at:** {report.scanned_at:%Y-%m-%d %H:%M:%S}  ",
+        "",
+        "## Rule Check Results",
+        "",
+        "| Check | Severity | Message |",
+        "|-------|----------|---------|",
+    ]
 
     for r in report.rule_results:
         icon = _SEVERITY_ICON.get(r.severity, "")
