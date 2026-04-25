@@ -199,8 +199,8 @@ async def _load_page_detail(bot: QABot, page_id_str: str) -> tuple[str, str]:
         return "### Select a page to view details", ""
 
     try:
-        page_id = int(page_id_str.strip())
-    except ValueError:
+        page_id = int(page_id_str.strip().split(":")[0].strip())
+    except (ValueError, IndexError):
         return "### Invalid page ID", ""
 
     if bot._database is None:
@@ -292,23 +292,34 @@ def create_app(bot: QABot) -> gr.Blocks:
 
                 async def on_refresh_with_choices():
                     sites_md = await _load_sites(bot)
-                    choices = _extract_page_choices(bot)
+                    choices = await _get_page_choices(bot)
                     return sites_md, gr.update(choices=choices)
 
-                def _extract_page_choices(bot_obj):
+                async def on_add_with_choices(url: str):
+                    sites_md = await _add_and_scan_site(bot, url)
+                    choices = await _get_page_choices(bot)
+                    return sites_md, gr.update(choices=choices)
+
+                async def _get_page_choices(bot_obj):
                     if bot_obj._database is None:
                         return []
-                    try:
-                        import asyncio
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            return []
-                    except RuntimeError:
-                        return []
-                    return []
+                    sites = await bot_obj._database.get_sites()
+                    choices = []
+                    for site in sites:
+                        for page in site.get("pages", []):
+                            label = f"{site['domain']}{page.get('path', '/')}"
+                            choices.append(f"{page['id']}: {label}")
+                    return choices
 
-                add_btn.click(fn=on_add_site, inputs=add_url_input, outputs=sites_output)
-                refresh_btn.click(fn=on_refresh_with_choices, outputs=[sites_output, page_selector])
+                add_btn.click(
+                    fn=on_add_with_choices,
+                    inputs=add_url_input,
+                    outputs=[sites_output, page_selector],
+                )
+                refresh_btn.click(
+                    fn=on_refresh_with_choices,
+                    outputs=[sites_output, page_selector],
+                )
                 page_selector.change(
                     fn=on_page_select,
                     inputs=page_selector,
