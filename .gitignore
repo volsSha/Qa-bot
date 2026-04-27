@@ -20,3 +20,4 @@ data/
 /.context/
 /.kilo/
 /docs/residual-review-findings/
+browser-test-*.png
