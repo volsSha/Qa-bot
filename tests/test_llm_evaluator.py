@@ -28,6 +28,8 @@ def _make_settings(**overrides) -> Settings:
     defaults = {
         "openrouter_api_key": "test-key",
         "llm_model": "openai/gpt-4",
+        "llm_vision_model": None,
+        "llm_text_model": None,
         "text_content_max_chars": 4000,
         "screenshot_history_depth": 2,
         "screenshot_history_max_width": 640,
