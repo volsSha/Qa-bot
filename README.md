@@ -14,6 +14,24 @@ QA Bot scans web pages using a headless browser, runs 10 built-in quality rules 
 - **Scheduled scanning** — Configurable intervals (1h, 6h, 12h, 24h, 7d) with pause/resume for automated re-scanning
 - **Web UI** — NiceGUI-based dashboard with scan management, site/page management, and settings
 - **Screenshots & reports** — Automatic full-page screenshot capture and JSON report generation
+
+## Screenshots
+
+### Dashboard
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Scan
+
+![Scan](docs/screenshots/scan.png)
+
+### Sites
+
+![Sites](docs/screenshots/sites.png)
+
+### Settings
+
+![Settings](docs/screenshots/settings.png)
 - **Database persistence** — SQLite (default) or PostgreSQL with SQLAlchemy async
 - **Concurrent scanning** — Configurable concurrency via semaphore
 
@@ -291,6 +309,25 @@ QA Bot сканує веб-сторінки за допомогою безгол
 - **Планове сканування** — настроювані інтервали (1г, 6г, 12г, 24г, 7д) з паузою/відновленням для автоматичного повторного сканування
 - **Веб-інтерфейс** — панель управління на основі NiceGUI з керуванням скануваннями, управлінням сайтами/сторінками та налаштуваннями
 - **Скріншоти та звіти** — автоматичний захват повносторінкових скріншотів та генерація JSON-звітів
+
+## Скріншоти
+
+### Панель управління
+
+![Панель управління](docs/screenshots/dashboard.png)
+
+### Сканування
+
+![Сканування](docs/screenshots/scan.png)
+
+### Сайти
+
+![Сайти](docs/screenshots/sites.png)
+
+### Налаштування
+
+![Налаштування](docs/screenshots/settings.png)
+
 - **Збереження в базі даних** — SQLite (за замовчуванням) або PostgreSQL з SQLAlchemy async
 - **Паралельне сканування** — настроюваний рівень паралелізму через семафор
 
