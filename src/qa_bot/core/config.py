@@ -40,6 +40,8 @@ class Settings(BaseSettings):
 
     openrouter_api_key: SecretStr
     llm_model: str = "openai/gpt-4"
+    llm_vision_model: str | None = None
+    llm_text_model: str | None = None
     database_url: str = f"sqlite+aiosqlite:///{_DATA_DIR / 'qa_bot.db'}"
     page_load_timeout: int = Field(default=30, ge=5, le=120)
     max_page_size_kb: int = Field(default=5000, ge=100, le=50000)
@@ -67,6 +69,10 @@ class Settings(BaseSettings):
     auth_login_attempt_window_seconds: int = Field(default=900, ge=60, le=86400)
     auth_login_block_seconds: int = Field(default=900, ge=60, le=86400)
     auth_trust_proxy_headers: bool = True
+
+    @property
+    def is_dual_model(self) -> bool:
+        return self.llm_vision_model is not None and self.llm_text_model is not None
 
     @property
     def session_cookie_secure(self) -> bool:
