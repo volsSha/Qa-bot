@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     def is_dual_model(self) -> bool:
         return self.llm_vision_model is not None and self.llm_text_model is not None
 
+    @field_validator("llm_vision_model", "llm_text_model")
+    @classmethod
+    def normalize_optional_model(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        normalized = v.strip()
+        return normalized or None
+
     @property
     def session_cookie_secure(self) -> bool:
         if self.auth_session_cookie_secure is not None:
