@@ -191,6 +191,23 @@ class TestGetSites:
         assert page["scan_count"] == 2
 
 
+class TestDeleteSite:
+    async def test_delete_site_removes_pages_and_scans(self, db):
+        await db.save_scan_for_url(_make_report("https://delete-me.example/"))
+        sites = await db.get_sites()
+        site = sites[0]
+        page_id = site["pages"][0]["id"]
+
+        deleted_domain = await db.delete_site(site["id"])
+
+        assert deleted_domain == "delete-me.example"
+        assert await db.get_sites() == []
+        assert await db.get_page_with_latest_scan(page_id) is None
+
+    async def test_delete_site_returns_none_for_missing_site(self, db):
+        assert await db.delete_site(99999) is None
+
+
 class TestGetScanHistory:
     async def test_history_ordered_by_time(self, db):
         await db.save_scan_for_url(_make_report("https://example.com/"))

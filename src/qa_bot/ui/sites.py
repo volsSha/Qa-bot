@@ -482,6 +482,10 @@ async def _confirm_delete_site(
     sites_container: ui.column,
     page_detail_container: ui.column,
 ) -> None:
+    async def confirm_delete() -> None:
+        dialog.close()
+        await _delete_site(bot, scheduler, site_id, sites_container, page_detail_container)
+
     with ui.dialog() as dialog, ui.card():
         ui.label(f"Delete {domain}?").classes("text-lg font-semibold")
         ui.label(
@@ -489,10 +493,7 @@ async def _confirm_delete_site(
         ).classes("text-sm text-gray-500 dark:text-gray-400")
         with ui.row().classes("justify-end w-full gap-2 mt-4"):
             ui.button("Cancel", on_click=dialog.close).props("flat")
-            ui.button("Delete", on_click=lambda: [
-                dialog.close(),
-                _delete_site(bot, scheduler, site_id, sites_container, page_detail_container),
-            ]).props("color=negative")
+            ui.button("Delete", on_click=confirm_delete).props("color=negative")
 
     dialog.open()
 
