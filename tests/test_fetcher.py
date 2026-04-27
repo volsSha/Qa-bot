@@ -1,6 +1,8 @@
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
 from qa_bot.config import Settings
 from qa_bot.domain.models import PageSnapshot
 from qa_bot.services.fetcher import PageFetcher
@@ -66,7 +68,7 @@ class TestHappyPath:
         assert result.load_time_ms >= 0
         assert isinstance(result.fetched_at, datetime)
         page.goto.assert_called_once_with(
-            "https://example.com", wait_until="networkidle", timeout=30000
+            "https://example.com", wait_until="domcontentloaded", timeout=30000
         )
         page.screenshot.assert_called_once_with(full_page=True, type="png")
         page.evaluate.assert_called_once_with("() => document.body.innerText")
@@ -113,7 +115,12 @@ class TestTimeout:
     @patch("asyncio.sleep", new_callable=AsyncMock)
     @patch("qa_bot.services.fetcher.async_playwright")
     async def test_timeout_retry_then_failure(self, mock_pw, mock_sleep):
-        page = _make_page(goto_side_effect=TimeoutError("Navigation timed out"))
+        page = _make_page(
+            html="",
+            screenshot=b"",
+            text_content="",
+            goto_side_effect=PlaywrightTimeoutError("Navigation timed out"),
+        )
         browser = _make_browser(page)
         mock_pw.return_value = _build_playwright_cm(browser)
 
@@ -126,6 +133,94 @@ class TestTimeout:
         assert len(result.console_errors) == 1
         assert "TimeoutError" in result.console_errors[0]
         assert page.goto.call_count == 3
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    @patch("qa_bot.services.fetcher.async_playwright")
+    async def test_timeout_empty_document_shell_retries_then_failure(self, mock_pw, mock_sleep):
+        page = _make_page(
+            html="<html><head></head><body></body></html>",
+            screenshot=b"",
+            text_content="",
+            goto_side_effect=PlaywrightTimeoutError("Navigation timed out"),
+        )
+        browser = _make_browser(page)
+        mock_pw.return_value = _build_playwright_cm(browser)
+
+        fetcher = PageFetcher(_make_settings())
+        result = await fetcher.fetch("https://example.com")
+
+        assert result.status_code == 0
+        assert result.html == ""
+        assert result.screenshot == b""
+        assert len(result.console_errors) == 1
+        assert "TimeoutError" in result.console_errors[0]
+        assert page.goto.call_count == 3
+
+    @patch("qa_bot.services.fetcher.async_playwright")
+    async def test_timeout_with_rendered_content_returns_partial_snapshot(self, mock_pw):
+        page = _make_page(
+            html="<html><head><title>Loaded</title></head><body>Hello</body></html>",
+            screenshot=b"\x89PNGpartial",
+            text_content="Hello",
+            goto_side_effect=PlaywrightTimeoutError("Navigation timed out"),
+        )
+        browser = _make_browser(page)
+        mock_pw.return_value = _build_playwright_cm(browser)
+
+        fetcher = PageFetcher(_make_settings())
+        result = await fetcher.fetch("https://example.com")
+
+        assert result.status_code == 0
+        assert result.html == "<html><head><title>Loaded</title></head><body>Hello</body></html>"
+        assert result.screenshot == b"\x89PNGpartial"
+        assert result.text_content == "Hello"
+        assert len(result.console_errors) == 1
+        assert "Navigation timed out" in result.console_errors[0]
+        page.goto.assert_called_once()
+
+    @patch("qa_bot.services.fetcher.async_playwright")
+    async def test_timeout_with_content_keeps_html_when_screenshot_fails(self, mock_pw):
+        page = _make_page(
+            html="<html><head><title>Loaded</title></head><body>Hello</body></html>",
+            text_content="Hello",
+            goto_side_effect=PlaywrightTimeoutError("Navigation timed out"),
+        )
+        page.screenshot.side_effect = PlaywrightTimeoutError("Screenshot timed out")
+        browser = _make_browser(page)
+        mock_pw.return_value = _build_playwright_cm(browser)
+
+        fetcher = PageFetcher(_make_settings())
+        result = await fetcher.fetch("https://example.com")
+
+        assert result.status_code == 0
+        assert result.html == "<html><head><title>Loaded</title></head><body>Hello</body></html>"
+        assert result.screenshot == b""
+        assert result.text_content == "Hello"
+        assert len(result.console_errors) == 2
+        assert "Navigation timed out" in result.console_errors[0]
+        assert "Screenshot capture failed" in result.console_errors[1]
+
+    @patch("qa_bot.services.fetcher.async_playwright")
+    async def test_timeout_with_content_keeps_html_when_text_capture_fails(self, mock_pw):
+        page = _make_page(
+            html="<html><head><title>Loaded</title></head><body>Hello</body></html>",
+            screenshot=b"\x89PNGpartial",
+            goto_side_effect=PlaywrightTimeoutError("Navigation timed out"),
+        )
+        page.evaluate.side_effect = PlaywrightTimeoutError("Text capture timed out")
+        browser = _make_browser(page)
+        mock_pw.return_value = _build_playwright_cm(browser)
+
+        fetcher = PageFetcher(_make_settings())
+        result = await fetcher.fetch("https://example.com")
+
+        assert result.status_code == 0
+        assert result.html == "<html><head><title>Loaded</title></head><body>Hello</body></html>"
+        assert result.screenshot == b"\x89PNGpartial"
+        assert result.text_content == ""
+        assert len(result.console_errors) == 2
+        assert "Navigation timed out" in result.console_errors[0]
+        assert "Text capture failed" in result.console_errors[1]
 
 
 class TestNetworkError:

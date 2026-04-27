@@ -16,6 +16,14 @@ def check_http_status(
             message=f"HTTP status {snapshot.status_code}",
             category="accessibility",
         )
+    if snapshot.status_code == 0 and preprocessed.text_content.strip():
+        return CheckResult(
+            check_name="http_status",
+            severity=Severity.WARNING,
+            message="HTTP status unavailable after page content was captured",
+            evidence="0",
+            category="accessibility",
+        )
     return CheckResult(
         check_name="http_status",
         severity=Severity.CRITICAL,

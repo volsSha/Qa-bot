@@ -1,6 +1,9 @@
 import time
 from datetime import UTC, datetime
 
+from bs4 import BeautifulSoup
+from playwright.async_api import Page, Response
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 from tenacity import (
     retry,
@@ -88,29 +91,74 @@ class PageFetcher:
                 )
 
                 start = time.monotonic()
-                response = await page.goto(
-                    url,
-                    wait_until="networkidle",
-                    timeout=self._settings.page_load_timeout * 1000,
-                )
-                load_time_ms = int((time.monotonic() - start) * 1000)
+                response: Response | None = None
+                try:
+                    response = await page.goto(
+                        url,
+                        wait_until="domcontentloaded",
+                        timeout=self._settings.page_load_timeout * 1000,
+                    )
+                except (TimeoutError, PlaywrightTimeoutError) as exc:
+                    console_errors.append(f"Navigation timed out: {exc}")
+                    snapshot = await self._capture_snapshot(
+                        page=page,
+                        url=url,
+                        response=response,
+                        console_errors=console_errors,
+                        load_time_ms=int((time.monotonic() - start) * 1000),
+                    )
+                    if self._has_usable_partial_content(snapshot):
+                        return snapshot
+                    raise TimeoutError(str(exc)) from exc
 
-                html = await page.content()
-                screenshot = await page.screenshot(full_page=True, type="png")
-                text_content = await page.evaluate("() => document.body.innerText")
-                text_content = (text_content or "")[: self._settings.text_content_max_chars]
-
-                status_code = response.status if response else 0
-
-                return PageSnapshot(
+                return await self._capture_snapshot(
+                    page=page,
                     url=url,
-                    html=html,
-                    screenshot=screenshot,
-                    text_content=text_content,
+                    response=response,
                     console_errors=console_errors,
-                    load_time_ms=load_time_ms,
-                    status_code=status_code,
-                    fetched_at=datetime.now(UTC),
+                    load_time_ms=int((time.monotonic() - start) * 1000),
                 )
             finally:
                 await browser.close()
+
+    async def _capture_snapshot(
+        self,
+        *,
+        page: Page,
+        url: str,
+        response: Response | None,
+        console_errors: list[str],
+        load_time_ms: int,
+    ) -> PageSnapshot:
+        html = await page.content()
+
+        try:
+            screenshot = await page.screenshot(full_page=True, type="png")
+        except Exception as exc:
+            console_errors.append(f"Screenshot capture failed: {exc}")
+            screenshot = b""
+
+        try:
+            text_content = await page.evaluate("() => document.body.innerText")
+        except Exception as exc:
+            console_errors.append(f"Text capture failed: {exc}")
+            text_content = ""
+        text_content = (text_content or "")[: self._settings.text_content_max_chars]
+
+        return PageSnapshot(
+            url=url,
+            html=html,
+            screenshot=screenshot,
+            text_content=text_content,
+            console_errors=console_errors,
+            load_time_ms=load_time_ms,
+            status_code=response.status if response else 0,
+            fetched_at=datetime.now(UTC),
+        )
+
+    def _has_usable_partial_content(self, snapshot: PageSnapshot) -> bool:
+        if snapshot.text_content.strip():
+            return True
+
+        soup = BeautifulSoup(snapshot.html, "lxml")
+        return bool(soup.get_text(separator=" ", strip=True))

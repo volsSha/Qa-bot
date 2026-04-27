@@ -91,6 +91,17 @@ class TestHappyPath:
         engine = RuleEngine(_SETTINGS)
         assert not has_critical_failure(engine.evaluate(snap, prep))
 
+    def test_unknown_status_with_captured_content_has_no_critical_failures(self):
+        snap = _healthy_snapshot(status_code=0)
+        prep = _healthy_preprocessed()
+        engine = RuleEngine(_SETTINGS)
+
+        results = engine.evaluate(snap, prep)
+
+        http_result = next(r for r in results if r.check_name == "http_status")
+        assert http_result.severity == Severity.WARNING
+        assert not has_critical_failure(results)
+
 
 # --- individual rule tests ---
 
@@ -118,6 +129,33 @@ class TestCheckHttpStatus:
             _healthy_snapshot(status_code=201), _healthy_preprocessed(), settings=_SETTINGS
         )
         assert r.severity == Severity.PASS
+
+    def test_warning_on_unknown_status_with_captured_content(self):
+        r = check_http_status(
+            _healthy_snapshot(status_code=0), _healthy_preprocessed(), settings=_SETTINGS
+        )
+        assert r.severity == Severity.WARNING
+        assert r.evidence == "0"
+
+    def test_critical_on_unknown_status_without_content(self):
+        r = check_http_status(
+            _healthy_snapshot(status_code=0, html=""),
+            _healthy_preprocessed(text_content=""),
+            settings=_SETTINGS,
+        )
+        assert r.severity == Severity.CRITICAL
+
+    def test_critical_on_unknown_status_with_empty_document_shell(self):
+        r = check_http_status(
+            _healthy_snapshot(
+                status_code=0,
+                html="<html><head></head><body></body></html>",
+                text_content="",
+            ),
+            _healthy_preprocessed(text_content=""),
+            settings=_SETTINGS,
+        )
+        assert r.severity == Severity.CRITICAL
 
 
 class TestCheckTitlePresent:
