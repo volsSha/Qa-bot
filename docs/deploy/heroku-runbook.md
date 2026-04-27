@@ -7,7 +7,7 @@ This runbook describes a production-safe deployment path for QA Bot on Heroku.
 - Heroku CLI installed and authenticated.
 - A Heroku app created.
 - Heroku Postgres attached.
-- Python runtime pinned by `runtime.txt`.
+- Python runtime pinned by `.python-version`.
 - Web process defined in `Procfile` as `web: python -m qa_bot.main`.
 
 ## 2) Required config vars
@@ -16,6 +16,8 @@ Set required production variables:
 
 - `APP_ENV`
 - `OPENROUTER_API_KEY`
+- `LLM_VISION_MODEL`
+- `LLM_TEXT_MODEL`
 - `AUTH_SESSION_SECRET`
 - `ADMIN_BOOTSTRAP_EMAIL`
 - `ADMIN_BOOTSTRAP_PASSWORD`
@@ -23,6 +25,8 @@ Set required production variables:
 ```bash
 heroku config:set APP_ENV=production
 heroku config:set OPENROUTER_API_KEY=<openrouter-key>
+heroku config:set LLM_VISION_MODEL=google/gemini-2.5-flash
+heroku config:set LLM_TEXT_MODEL=openai/gpt-5-mini
 heroku config:set AUTH_SESSION_SECRET=<long-random-secret-at-least-24-chars>
 heroku config:set ADMIN_BOOTSTRAP_EMAIL=<admin-email>
 heroku config:set ADMIN_BOOTSTRAP_PASSWORD=<strong-password-at-least-12-chars>

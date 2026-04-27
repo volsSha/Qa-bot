@@ -146,7 +146,10 @@ class LLMEvaluator:
         user_content = [
             {
                 "type": "text",
-                "text": f"Page URL: {snapshot.url}\n\nAnalyze this web page screenshot for visual quality.",
+                "text": (
+                    f"Page URL: {snapshot.url}\n\n"
+                    "Analyze this web page screenshot for visual quality."
+                ),
             },
             {
                 "type": "text",
@@ -215,7 +218,7 @@ class LLMEvaluator:
 
         parts = [
             f"Page URL: {snapshot.url}\n\n",
-            f"Rule Check Results:\n",
+            "Rule Check Results:\n",
             f"{rules_summary if rules_summary else 'All rules passed.'}\n\n",
         ]
 

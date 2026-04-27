@@ -16,9 +16,9 @@ from qa_bot.domain.models import (
 )
 from qa_bot.services.llm_evaluator import (
     EVALUATION_CATEGORIES,
-    LLMEvaluator,
     TEXT_CATEGORIES,
     VISION_CATEGORIES,
+    LLMEvaluator,
 )
 
 NOW = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
@@ -609,7 +609,7 @@ def _make_dual_settings(**overrides) -> Settings:
     defaults = {
         "openrouter_api_key": "test-key",
         "llm_model": "openai/gpt-4",
-        "llm_vision_model": "google/gemini-3-flash-preview",
+        "llm_vision_model": "google/gemini-2.5-flash",
         "llm_text_model": "openai/gpt-5-mini",
         "text_content_max_chars": 4000,
         "screenshot_history_depth": 2,
@@ -629,7 +629,7 @@ def dual_evaluator(dual_settings: Settings) -> LLMEvaluator:
     return LLMEvaluator(dual_settings)
 
 
-def _patch_openrouter(mock_resp, model: str = None):
+def _patch_openrouter(mock_resp, model: str | None = None):
     if model is None:
         model = "test-model"
     resp = MagicMock()
@@ -652,7 +652,7 @@ class TestDualModelHappyPath:
     async def test_dual_model_returns_merged_findings(self, dual_evaluator: LLMEvaluator):
         vision_payload = json.dumps(_make_findings_json(categories=VISION_CATEGORIES))
         text_payload = json.dumps(_make_findings_json(categories=TEXT_CATEGORIES))
-        vision_resp = _mock_response(vision_payload, model="google/gemini-3-flash-preview")
+        vision_resp = _mock_response(vision_payload, model="google/gemini-2.5-flash")
         text_resp = _mock_response(text_payload, model="openai/gpt-5-mini")
 
         with patch("qa_bot.services.llm_evaluator.openrouter.OpenRouter") as MockOR:
@@ -679,7 +679,7 @@ class TestDualModelHappyPath:
                 )
 
         assert isinstance(result, LLMEvaluation)
-        assert "google/gemini-3-flash-preview" in result.model
+        assert "google/gemini-2.5-flash" in result.model
         assert "openai/gpt-5-mini" in result.model
         assert len(result.findings) == 8
         vision_cats = {f.category for f in result.findings}
@@ -690,7 +690,7 @@ class TestDualModelHappyPath:
     async def test_dual_model_calls_separate_models(self, dual_evaluator: LLMEvaluator):
         vision_payload = json.dumps(_make_findings_json(categories=VISION_CATEGORIES))
         text_payload = json.dumps(_make_findings_json(categories=TEXT_CATEGORIES))
-        vision_resp = _mock_response(vision_payload, model="google/gemini-3-flash-preview")
+        vision_resp = _mock_response(vision_payload, model="google/gemini-2.5-flash")
         text_resp = _mock_response(text_payload, model="openai/gpt-5-mini")
 
         with patch("qa_bot.services.llm_evaluator.openrouter.OpenRouter") as MockOR:
@@ -718,7 +718,7 @@ class TestDualModelHappyPath:
         assert mock_client.chat.send_async.call_count == 2
         first_call_model = mock_client.chat.send_async.call_args_list[0].kwargs.get("model")
         second_call_model = mock_client.chat.send_async.call_args_list[1].kwargs.get("model")
-        assert first_call_model == "google/gemini-3-flash-preview"
+        assert first_call_model == "google/gemini-2.5-flash"
         assert second_call_model == "openai/gpt-5-mini"
 
     @pytest.mark.asyncio
@@ -739,7 +739,7 @@ class TestDualModelHappyPath:
             }
         )
         text_payload = json.dumps(_make_findings_json(categories=TEXT_CATEGORIES))
-        vision_resp = _mock_response(vision_payload, model="google/gemini-3-flash-preview")
+        vision_resp = _mock_response(vision_payload, model="google/gemini-2.5-flash")
         text_resp = _mock_response(text_payload, model="openai/gpt-5-mini")
 
         with patch("qa_bot.services.llm_evaluator.openrouter.OpenRouter") as MockOR:
@@ -839,7 +839,7 @@ class TestDualModelFallback:
         self, dual_evaluator: LLMEvaluator
     ):
         vision_payload = json.dumps(_make_findings_json(categories=VISION_CATEGORIES))
-        vision_resp = _mock_response(vision_payload, model="google/gemini-3-flash-preview")
+        vision_resp = _mock_response(vision_payload, model="google/gemini-2.5-flash")
         text_resp = _mock_response("not json {{{", model="openai/gpt-5-mini")
 
         with patch("qa_bot.services.llm_evaluator.openrouter.OpenRouter") as MockOR:
@@ -874,14 +874,14 @@ class TestDualModelFallback:
 class TestDualModelConfig:
     def test_is_dual_model_true_when_both_set(self):
         s = _make_dual_settings(
-            llm_vision_model="google/gemini-3-flash-preview",
+            llm_vision_model="google/gemini-2.5-flash",
             llm_text_model="openai/gpt-5-mini",
         )
         assert s.is_dual_model is True
 
     def test_is_dual_model_false_when_only_vision_set(self):
         s = _make_dual_settings(
-            llm_vision_model="google/gemini-3-flash-preview",
+            llm_vision_model="google/gemini-2.5-flash",
             llm_text_model=None,
         )
         assert s.is_dual_model is False
@@ -919,7 +919,7 @@ class TestDualModelHistoricalScreenshots:
         )
         vision_payload = json.dumps(_make_findings_json(categories=VISION_CATEGORIES))
         text_payload = json.dumps(_make_findings_json(categories=TEXT_CATEGORIES))
-        vision_resp = _mock_response(vision_payload, model="google/gemini-3-flash-preview")
+        vision_resp = _mock_response(vision_payload, model="google/gemini-2.5-flash")
         text_resp = _mock_response(text_payload, model="openai/gpt-5-mini")
 
         with patch("qa_bot.services.llm_evaluator.openrouter.OpenRouter") as MockOR:
