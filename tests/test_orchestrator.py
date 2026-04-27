@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from qa_bot.config import Settings
-from qa_bot.models import (
+from qa_bot.domain.models import (
     CheckResult,
+    HistoricalContext,
     LLMEvaluation,
     LLMFinding,
     OverallStatus,
@@ -16,16 +17,9 @@ from qa_bot.models import (
     ScanBatch,
     Severity,
 )
-from qa_bot.orchestrator import QABot
+from qa_bot.services.orchestrator import QABot
 
 _NOW = datetime(2026, 1, 1, 0, 0, 0)
-
-@pytest.fixture(autouse=True)
-def _mock_save(monkeypatch):
-    monkeypatch.setattr("qa_bot.orchestrator.save_screenshot", MagicMock())
-    monkeypatch.setattr("qa_bot.orchestrator.save_report", MagicMock())
-    monkeypatch.setattr("qa_bot.orchestrator.save_batch_report", MagicMock())
-
 
 _SETTINGS = Settings(
     openrouter_api_key="sk-test",
@@ -35,7 +29,17 @@ _SETTINGS = Settings(
     health_healthy_threshold=80,
     health_degraded_threshold=50,
     max_concurrent_scans=2,
+    health_score_regression_penalty=5,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_save(monkeypatch):
+    monkeypatch.setattr(
+        "qa_bot.services.orchestrator.save_screenshot", MagicMock(return_value=MagicMock())
+    )
+    monkeypatch.setattr("qa_bot.services.orchestrator.save_report", MagicMock())
+    monkeypatch.setattr("qa_bot.services.orchestrator.save_batch_report", MagicMock())
 
 
 def _snapshot(url: str = "https://example.com") -> PageSnapshot:
@@ -122,6 +126,13 @@ class TestHappyPath:
         assert report.llm_evaluation is not None
         assert "Healthy" in report.summary
 
+    @pytest.mark.asyncio
+    async def test_screenshot_path_in_report(self):
+        bot = _make_bot_with_rules(_pass_rules())
+        report = await bot.scan_url("https://example.com")
+
+        assert report.screenshot_path is not None
+
 
 class TestDecisionRouter:
     @pytest.mark.asyncio
@@ -173,6 +184,55 @@ class TestHealthScore:
         expected = 100 - (2 * 30) - (2 * 10) - 2
         assert report.health_score == expected
 
+    @pytest.mark.asyncio
+    async def test_regression_penalty_applied(self):
+        llm_with_regression = LLMEvaluation(
+            model="openai/gpt-4",
+            findings=[
+                LLMFinding(
+                    category="visual_regression",
+                    passed=False,
+                    confidence=0.8,
+                    evidence="Layout shifted",
+                    recommendation="Check CSS changes",
+                ),
+            ],
+            raw_response="{}",
+            evaluated_at=_NOW,
+        )
+        bot = _make_bot_with_rules(_pass_rules())
+        bot._llm_evaluator.evaluate = AsyncMock(return_value=llm_with_regression)
+        bot._load_historical_contexts = AsyncMock(
+            return_value=[HistoricalContext(previous_findings_summary="ok")]
+        )
+
+        report = await bot.scan_url("https://example.com")
+
+        assert report.health_score == 100.0 - 5.0
+
+    @pytest.mark.asyncio
+    async def test_regression_pass_no_penalty(self):
+        llm_no_regression = LLMEvaluation(
+            model="openai/gpt-4",
+            findings=[
+                LLMFinding(
+                    category="visual_regression",
+                    passed=True,
+                    confidence=0.9,
+                    evidence="No visual changes",
+                    recommendation=None,
+                ),
+            ],
+            raw_response="{}",
+            evaluated_at=_NOW,
+        )
+        bot = _make_bot_with_rules(_pass_rules())
+        bot._llm_evaluator.evaluate = AsyncMock(return_value=llm_no_regression)
+
+        report = await bot.scan_url("https://example.com")
+
+        assert report.health_score == 100.0
+
 
 class TestStatusThresholds:
     @pytest.mark.asyncio
@@ -221,6 +281,44 @@ class TestEdgeCases:
         assert isinstance(batch, ScanBatch)
         assert batch.urls == []
         assert batch.reports == []
+
+    @pytest.mark.asyncio
+    async def test_no_database_no_historical_context(self):
+        bot = _make_bot_with_rules(_pass_rules())
+        assert bot._database is None
+
+        report = await bot.scan_url("https://example.com")
+        assert report.overall_status == OverallStatus.HEALTHY
+
+    @pytest.mark.asyncio
+    async def test_visual_regression_disabled(self):
+        settings = Settings(
+            openrouter_api_key="sk-test",
+            visual_regression_enabled=False,
+            health_score_regression_penalty=5,
+        )
+        bot = QABot(settings)
+        bot._fetcher.fetch = AsyncMock(return_value=_snapshot())
+        llm_with_regression = LLMEvaluation(
+            model="openai/gpt-4",
+            findings=[
+                LLMFinding(
+                    category="visual_regression",
+                    passed=False,
+                    confidence=0.8,
+                    evidence="Layout shifted",
+                    recommendation="Check CSS",
+                ),
+            ],
+            raw_response="{}",
+            evaluated_at=_NOW,
+        )
+        bot._llm_evaluator.evaluate = AsyncMock(return_value=llm_with_regression)
+        bot._rule_engine.evaluate = MagicMock(return_value=_pass_rules())
+
+        report = await bot.scan_url("https://example.com")
+
+        assert report.health_score == 100.0
 
 
 class TestScanUrls:

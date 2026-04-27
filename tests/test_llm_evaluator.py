@@ -6,14 +6,15 @@ import httpx
 import pytest
 
 from qa_bot.config import Settings
-from qa_bot.llm_evaluator import EVALUATION_CATEGORIES, LLMEvaluator
-from qa_bot.models import (
+from qa_bot.domain.models import (
     CheckResult,
+    HistoricalContext,
     LLMEvaluation,
     PageSnapshot,
     PreprocessedPage,
     Severity,
 )
+from qa_bot.services.llm_evaluator import EVALUATION_CATEGORIES, LLMEvaluator
 
 NOW = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
 
@@ -23,6 +24,8 @@ def _make_settings(**overrides) -> Settings:
         "openrouter_api_key": "test-key",
         "llm_model": "openai/gpt-4",
         "text_content_max_chars": 4000,
+        "screenshot_history_depth": 2,
+        "screenshot_history_max_width": 640,
     }
     defaults.update(overrides)
     return Settings(**defaults)
@@ -103,21 +106,21 @@ def evaluator(settings: Settings) -> LLMEvaluator:
 
 class TestHappyPath:
     @pytest.mark.asyncio
-    async def test_returns_evaluation_with_five_findings(
+    async def test_returns_evaluation_with_all_findings(
         self, evaluator: LLMEvaluator, settings: Settings
     ):
         payload = _make_findings_json()
         mock_resp = _mock_response(json.dumps(payload))
 
         with patch(
-            "qa_bot.llm_evaluator.openrouter.OpenRouter"
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
         ) as MockOR:
             mock_client = AsyncMock()
             mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
             MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("qa_bot.llm_evaluator.datetime") as mock_dt:
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
                 mock_dt.now.return_value = NOW
                 mock_dt.UTC = UTC
 
@@ -129,7 +132,7 @@ class TestHappyPath:
 
         assert isinstance(result, LLMEvaluation)
         assert result.model == "openai/gpt-4"
-        assert len(result.findings) == 5
+        assert len(result.findings) == 8
         categories = {f.category for f in result.findings}
         assert categories == set(EVALUATION_CATEGORIES)
         for finding in result.findings:
@@ -146,14 +149,14 @@ class TestTextTruncation:
         mock_resp = _mock_response(json.dumps(_make_findings_json()))
 
         with patch(
-            "qa_bot.llm_evaluator.openrouter.OpenRouter"
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
         ) as MockOR:
             mock_client = AsyncMock()
             mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
             MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("qa_bot.llm_evaluator.datetime") as mock_dt:
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
                 mock_dt.now.return_value = NOW
                 mock_dt.UTC = UTC
 
@@ -179,14 +182,14 @@ class TestMalformedJson:
         mock_resp = _mock_response("this is not json {{{")
 
         with patch(
-            "qa_bot.llm_evaluator.openrouter.OpenRouter"
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
         ) as MockOR:
             mock_client = AsyncMock()
             mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
             MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("qa_bot.llm_evaluator.datetime") as mock_dt:
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
                 mock_dt.now.return_value = NOW
                 mock_dt.UTC = UTC
 
@@ -230,14 +233,14 @@ class TestRateLimitRetry:
             return mock_resp
 
         with patch(
-            "qa_bot.llm_evaluator.openrouter.OpenRouter"
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
         ) as MockOR:
             mock_client = AsyncMock()
             mock_client.chat.send_async = AsyncMock(side_effect=side_effect)
             MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("qa_bot.llm_evaluator.datetime") as mock_dt:
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
                 mock_dt.now.return_value = NOW
                 mock_dt.UTC = UTC
 
@@ -248,7 +251,7 @@ class TestRateLimitRetry:
                 )
 
         assert call_count == 2
-        assert len(result.findings) == 5
+        assert len(result.findings) == 8
 
 
 class TestTimeoutRetry:
@@ -260,14 +263,14 @@ class TestTimeoutRetry:
             raise httpx.ReadTimeout("Request timed out")
 
         with patch(
-            "qa_bot.llm_evaluator.openrouter.OpenRouter"
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
         ) as MockOR:
             mock_client = AsyncMock()
             mock_client.chat.send_async = AsyncMock(side_effect=always_timeout)
             MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("qa_bot.llm_evaluator.datetime") as mock_dt:
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
                 mock_dt.now.return_value = NOW
                 mock_dt.UTC = UTC
 
@@ -289,14 +292,14 @@ class TestPromptConstruction:
         mock_resp = _mock_response(json.dumps(_make_findings_json()))
 
         with patch(
-            "qa_bot.llm_evaluator.openrouter.OpenRouter"
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
         ) as MockOR:
             mock_client = AsyncMock()
             mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
             MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("qa_bot.llm_evaluator.datetime") as mock_dt:
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
                 mock_dt.now.return_value = NOW
                 mock_dt.UTC = UTC
 
@@ -320,6 +323,275 @@ class TestPromptConstruction:
             assert "Alt text missing" in user_text
             assert "Some content" in user_text
 
-            image_part = messages[1].content[1]
-            assert image_part.type == "image_url"
-            assert image_part.image_url.url.startswith("data:image/png;base64,")
+            image_parts = [
+                p for p in messages[1].content if hasattr(p, "type") and p.type == "image_url"
+            ]
+            assert len(image_parts) == 1
+            assert image_parts[0].image_url.url.startswith("data:image/png;base64,")
+
+    @pytest.mark.asyncio
+    async def test_no_historical_screenshots_by_default(self, evaluator: LLMEvaluator):
+        mock_resp = _mock_response(json.dumps(_make_findings_json()))
+
+        with patch(
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
+        ) as MockOR:
+            mock_client = AsyncMock()
+            mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
+            MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
+                mock_dt.now.return_value = NOW
+                mock_dt.UTC = UTC
+
+                await evaluator.evaluate(
+                    _make_snapshot(),
+                    _make_preprocessed(),
+                    [],
+                )
+
+            call_args = mock_client.chat.send_async.call_args
+            messages = call_args.kwargs["messages"]
+            image_parts = [
+                p for p in messages[1].content if hasattr(p, "type") and p.type == "image_url"
+            ]
+            assert len(image_parts) == 1
+
+
+class TestMultiImage:
+    @pytest.mark.asyncio
+    async def test_historical_screenshots_included(self, evaluator: LLMEvaluator, tmp_path):
+        hist_screenshot = tmp_path / "prev.png"
+        hist_screenshot.write_bytes(b"prev-png-data")
+
+        ctx = HistoricalContext(
+            previous_findings_summary="1 warning found",
+            previous_health_score=85.0,
+            previous_scanned_at=NOW,
+            screenshot_path=str(hist_screenshot),
+        )
+        mock_resp = _mock_response(json.dumps(_make_findings_json()))
+
+        with patch(
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
+        ) as MockOR:
+            mock_client = AsyncMock()
+            mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
+            MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
+                mock_dt.now.return_value = NOW
+                mock_dt.UTC = UTC
+
+                with patch(
+                    "qa_bot.services.llm_evaluator._resize_screenshot",
+                    side_effect=lambda b, w: b,
+                ):
+                    await evaluator.evaluate(
+                        _make_snapshot(),
+                        _make_preprocessed(),
+                        [],
+                        historical_contexts=[ctx],
+                    )
+
+            call_args = mock_client.chat.send_async.call_args
+            messages = call_args.kwargs["messages"]
+            image_parts = [
+                p for p in messages[1].content if hasattr(p, "type") and p.type == "image_url"
+            ]
+            assert len(image_parts) == 2
+
+    @pytest.mark.asyncio
+    async def test_missing_historical_screenshot_skipped(self, evaluator: LLMEvaluator):
+        ctx = HistoricalContext(
+            previous_findings_summary="All good",
+            previous_health_score=90.0,
+            previous_scanned_at=NOW,
+            screenshot_path="/nonexistent/path.png",
+        )
+        mock_resp = _mock_response(json.dumps(_make_findings_json()))
+
+        with patch(
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
+        ) as MockOR:
+            mock_client = AsyncMock()
+            mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
+            MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
+                mock_dt.now.return_value = NOW
+                mock_dt.UTC = UTC
+
+                await evaluator.evaluate(
+                    _make_snapshot(),
+                    _make_preprocessed(),
+                    [],
+                    historical_contexts=[ctx],
+                )
+
+            call_args = mock_client.chat.send_async.call_args
+            messages = call_args.kwargs["messages"]
+            image_parts = [
+                p for p in messages[1].content if hasattr(p, "type") and p.type == "image_url"
+            ]
+            assert len(image_parts) == 1
+
+    @pytest.mark.asyncio
+    async def test_none_screenshot_path_skipped(self, evaluator: LLMEvaluator):
+        ctx = HistoricalContext(
+            previous_findings_summary="All good",
+        )
+        mock_resp = _mock_response(json.dumps(_make_findings_json()))
+
+        with patch(
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
+        ) as MockOR:
+            mock_client = AsyncMock()
+            mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
+            MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
+                mock_dt.now.return_value = NOW
+                mock_dt.UTC = UTC
+
+                await evaluator.evaluate(
+                    _make_snapshot(),
+                    _make_preprocessed(),
+                    [],
+                    historical_contexts=[ctx],
+                )
+
+            call_args = mock_client.chat.send_async.call_args
+            messages = call_args.kwargs["messages"]
+            image_parts = [
+                p for p in messages[1].content if hasattr(p, "type") and p.type == "image_url"
+            ]
+            assert len(image_parts) == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_historical_contexts_list(self, evaluator: LLMEvaluator):
+        mock_resp = _mock_response(json.dumps(_make_findings_json()))
+
+        with patch(
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
+        ) as MockOR:
+            mock_client = AsyncMock()
+            mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
+            MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
+                mock_dt.now.return_value = NOW
+                mock_dt.UTC = UTC
+
+                await evaluator.evaluate(
+                    _make_snapshot(),
+                    _make_preprocessed(),
+                    [],
+                    historical_contexts=[],
+                )
+
+            call_args = mock_client.chat.send_async.call_args
+            messages = call_args.kwargs["messages"]
+            image_parts = [
+                p for p in messages[1].content if hasattr(p, "type") and p.type == "image_url"
+            ]
+            assert len(image_parts) == 1
+
+    @pytest.mark.asyncio
+    async def test_multiple_historical_screenshots(self, evaluator: LLMEvaluator, tmp_path):
+        paths = []
+        for i in range(2):
+            p = tmp_path / f"prev_{i}.png"
+            p.write_bytes(f"prev-png-{i}".encode())
+            paths.append(str(p))
+
+        contexts = [
+            HistoricalContext(
+                previous_findings_summary=f"Scan {i}",
+                previous_health_score=80.0 + i,
+                previous_scanned_at=NOW,
+                screenshot_path=paths[i],
+            )
+            for i in range(2)
+        ]
+        mock_resp = _mock_response(json.dumps(_make_findings_json()))
+
+        with patch(
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
+        ) as MockOR:
+            mock_client = AsyncMock()
+            mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
+            MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
+                mock_dt.now.return_value = NOW
+                mock_dt.UTC = UTC
+
+                with patch(
+                    "qa_bot.services.llm_evaluator._resize_screenshot",
+                    side_effect=lambda b, w: b,
+                ):
+                    await evaluator.evaluate(
+                        _make_snapshot(),
+                        _make_preprocessed(),
+                        [],
+                        historical_contexts=contexts,
+                    )
+
+            call_args = mock_client.chat.send_async.call_args
+            messages = call_args.kwargs["messages"]
+            image_parts = [
+                p for p in messages[1].content if hasattr(p, "type") and p.type == "image_url"
+            ]
+            assert len(image_parts) == 3
+
+    @pytest.mark.asyncio
+    async def test_previous_summary_included_in_message(
+        self, evaluator: LLMEvaluator, tmp_path
+    ):
+        hist_screenshot = tmp_path / "prev.png"
+        hist_screenshot.write_bytes(b"prev-png-data")
+
+        ctx = HistoricalContext(
+            previous_findings_summary="2 warnings: slow load, missing alt",
+            previous_health_score=75.0,
+            previous_scanned_at=NOW,
+            screenshot_path=str(hist_screenshot),
+        )
+        mock_resp = _mock_response(json.dumps(_make_findings_json()))
+
+        with patch(
+        "qa_bot.services.llm_evaluator.openrouter.OpenRouter"
+        ) as MockOR:
+            mock_client = AsyncMock()
+            mock_client.chat.send_async = AsyncMock(return_value=mock_resp)
+            MockOR.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockOR.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("qa_bot.services.llm_evaluator.datetime") as mock_dt:
+                mock_dt.now.return_value = NOW
+                mock_dt.UTC = UTC
+
+                with patch(
+                    "qa_bot.services.llm_evaluator._resize_screenshot",
+                    side_effect=lambda b, w: b,
+                ):
+                    await evaluator.evaluate(
+                        _make_snapshot(),
+                        _make_preprocessed(),
+                        [],
+                        historical_contexts=[ctx],
+                    )
+
+            call_args = mock_client.chat.send_async.call_args
+            messages = call_args.kwargs["messages"]
+            all_text = " ".join(
+                p.text for p in messages[1].content if hasattr(p, "type") and p.type == "text"
+            )
+            assert "2 warnings: slow load, missing alt" in all_text

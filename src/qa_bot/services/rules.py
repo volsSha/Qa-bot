@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .config import Settings
-from .models import CheckResult, PageSnapshot, PreprocessedPage, Severity
+from qa_bot.config import Settings
+from qa_bot.domain.models import CheckResult, PageSnapshot, PreprocessedPage, Severity
 
 EMPTY_HREFS = {"", "/", "#", "javascript:void(0)"}
 

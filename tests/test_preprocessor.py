@@ -1,5 +1,5 @@
-from qa_bot.models import FormInfo, HeadingInfo, ImageInfo, LinkInfo, PreprocessedPage
-from qa_bot.preprocessor import preprocess
+from qa_bot.domain.models import FormInfo, HeadingInfo, ImageInfo, LinkInfo, PreprocessedPage
+from qa_bot.services.preprocessor import preprocess
 
 
 def test_happy_path_well_formed_html():

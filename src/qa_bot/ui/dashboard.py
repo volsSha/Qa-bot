@@ -4,11 +4,12 @@ from typing import TYPE_CHECKING
 
 from nicegui import ui
 
-from qa_bot.ui_helpers import score_badge, status_badge
-from qa_bot.ui_layout import create_layout
+from qa_bot.services.auth import require_authenticated_user
+from qa_bot.ui.helpers import score_badge, status_badge
+from qa_bot.ui.layout import create_layout
 
 if TYPE_CHECKING:
-    from qa_bot.orchestrator import QABot
+    from qa_bot.services.orchestrator import QABot
 
 
 async def _load_stats(bot: QABot, stats_container: ui.column) -> None:
@@ -186,9 +187,12 @@ async def _load_recent(bot: QABot, recent_container: ui.column) -> None:
 
 @ui.page("/")
 async def dashboard_page():
+    user = await require_authenticated_user()
+    if user is None:
+        return
 
-    create_layout(active="dashboard")
-    from qa_bot.state import bot as _bot
+    create_layout(active="dashboard", user_email=user.email, is_admin=user.is_admin)
+    from qa_bot.services.state import bot as _bot
 
     bot = _bot
     if bot is None:

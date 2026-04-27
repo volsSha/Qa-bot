@@ -2,8 +2,8 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from qa_bot.config import Settings
-from qa_bot.fetcher import PageFetcher
-from qa_bot.models import PageSnapshot
+from qa_bot.domain.models import PageSnapshot
+from qa_bot.services.fetcher import PageFetcher
 
 
 def _make_settings(**overrides) -> Settings:
@@ -48,7 +48,7 @@ def _build_playwright_cm(browser: AsyncMock) -> MagicMock:
 
 
 class TestHappyPath:
-    @patch("qa_bot.fetcher.async_playwright")
+    @patch("qa_bot.services.fetcher.async_playwright")
     async def test_fetch_returns_snapshot(self, mock_pw):
         page = _make_page()
         browser = _make_browser(page)
@@ -75,7 +75,7 @@ class TestHappyPath:
 
 
 class TestConsoleErrors:
-    @patch("qa_bot.fetcher.async_playwright")
+    @patch("qa_bot.services.fetcher.async_playwright")
     async def test_console_errors_captured(self, mock_pw):
         page = _make_page()
         browser = _make_browser(page)
@@ -111,7 +111,7 @@ class TestConsoleErrors:
 
 class TestTimeout:
     @patch("asyncio.sleep", new_callable=AsyncMock)
-    @patch("qa_bot.fetcher.async_playwright")
+    @patch("qa_bot.services.fetcher.async_playwright")
     async def test_timeout_retry_then_failure(self, mock_pw, mock_sleep):
         page = _make_page(goto_side_effect=TimeoutError("Navigation timed out"))
         browser = _make_browser(page)
@@ -130,7 +130,7 @@ class TestTimeout:
 
 class TestNetworkError:
     @patch("asyncio.sleep", new_callable=AsyncMock)
-    @patch("qa_bot.fetcher.async_playwright")
+    @patch("qa_bot.services.fetcher.async_playwright")
     async def test_dns_failure(self, mock_pw, mock_sleep):
         page = _make_page(goto_side_effect=ConnectionError("DNS lookup failed"))
         browser = _make_browser(page)
@@ -148,7 +148,7 @@ class TestNetworkError:
 
 
 class TestHTTP500:
-    @patch("qa_bot.fetcher.async_playwright")
+    @patch("qa_bot.services.fetcher.async_playwright")
     async def test_http_500_captured(self, mock_pw):
         page = _make_page(status=500)
         browser = _make_browser(page)

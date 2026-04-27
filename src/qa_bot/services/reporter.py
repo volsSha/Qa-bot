@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from qa_bot.config import _REPORTS_DIR, _SCREENSHOTS_DIR
-from qa_bot.models import (
+from qa_bot.domain.models import (
     OverallStatus,
     ScanBatch,
     ScanReport,
@@ -83,6 +83,11 @@ def format_report_markdown(report: ScanReport) -> str:
     lines.append("")
 
     if report.llm_evaluation is not None:
+        regression_categories = {"visual_regression", "layout_drift", "content_consistency"}
+        regression_findings = [
+            f for f in report.llm_evaluation.findings if f.category in regression_categories
+        ]
+
         lines.append("## LLM Evaluation")
         lines.append("")
         lines.append(f"**Model:** {report.llm_evaluation.model}  ")
@@ -96,6 +101,19 @@ def format_report_markdown(report: ScanReport) -> str:
             if f.recommendation:
                 lines.append(f"- **Recommendation:** {f.recommendation}")
             lines.append("")
+
+        if regression_findings:
+            failed_regressions = [f for f in regression_findings if not f.passed]
+            if failed_regressions:
+                lines.append("## Visual Regression Analysis")
+                lines.append("")
+                lines.append(f"**{len(failed_regressions)} visual change(s) detected.**")
+                lines.append("")
+                for f in failed_regressions:
+                    lines.append(f"- **{f.category}:** {f.evidence}")
+                    if f.recommendation:
+                        lines.append(f"  - _Recommendation: {f.recommendation}_")
+                lines.append("")
     else:
         lines.append("## LLM Evaluation")
         lines.append("")

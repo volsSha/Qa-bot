@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from qa_bot.config import Settings
-from qa_bot.database import Database
-from qa_bot.db_models import Base
-from qa_bot.models import (
+from qa_bot.db.database import Database
+from qa_bot.domain.models import (
     CheckResult,
     LLMEvaluation,
     LLMFinding,
@@ -23,6 +20,7 @@ def _make_settings(database_url: str = "sqlite+aiosqlite:///:memory:") -> Settin
     return Settings.model_construct(
         openrouter_api_key="test-key",
         database_url=database_url,
+        auth_session_secret="test-secret-at-least-16",
     )
 
 
@@ -239,6 +237,28 @@ class TestGetScanResult:
         scan_data = await db.get_scan_result(99999)
         assert scan_data is None
 
+    async def test_screenshot_path_roundtrip(self, db):
+        report = _make_report()
+        site = await db.upsert_site("example.com")
+        page = await db.upsert_page(site.id, report.url, "/")
+        result = await db.save_scan(
+            page.id, report, screenshot_path="data/screenshots/test.png"
+        )
+
+        scan_data = await db.get_scan_result(result.id)
+        assert scan_data is not None
+        assert scan_data["screenshot_path"] == "data/screenshots/test.png"
+
+    async def test_screenshot_path_none_default(self, db):
+        report = _make_report()
+        site = await db.upsert_site("example.com")
+        page = await db.upsert_page(site.id, report.url, "/")
+        result = await db.save_scan(page.id, report)
+
+        scan_data = await db.get_scan_result(result.id)
+        assert scan_data is not None
+        assert scan_data["screenshot_path"] is None
+
 
 class TestGetPageWithLatestScan:
     async def test_page_detail(self, db):
@@ -266,3 +286,115 @@ class TestGetPageWithLatestScan:
     async def test_nonexistent_page(self, db):
         detail = await db.get_page_with_latest_scan(99999)
         assert detail is None
+
+
+class TestGetPreviousScans:
+    async def test_returns_up_to_limit(self, db):
+        for i in range(4):
+            await db.save_scan_for_url(
+                _make_report("https://example.com/", score=float(80 + i))
+            )
+        sites = await db.get_sites()
+        page_id = sites[0]["pages"][0]["id"]
+
+        prev = await db.get_previous_scans(page_id, limit=2)
+        assert len(prev) == 2
+
+    async def test_returns_empty_for_new_page(self, db):
+        site = await db.upsert_site("example.com")
+        page = await db.upsert_page(site.id, "https://example.com/", "/")
+
+        prev = await db.get_previous_scans(page.id, limit=2)
+        assert prev == []
+
+    async def test_excludes_broken_scans(self, db):
+        await db.save_scan_for_url(
+            _make_report("https://example.com/", OverallStatus.HEALTHY, 90.0)
+        )
+        await db.save_scan_for_url(
+            _make_report("https://example.com/", OverallStatus.BROKEN, 10.0)
+        )
+        sites = await db.get_sites()
+        page_id = sites[0]["pages"][0]["id"]
+
+        prev = await db.get_previous_scans(page_id, limit=5)
+        assert all(s["overall_status"] != "broken" for s in prev)
+
+    async def test_includes_screenshot_path(self, db):
+        report = _make_report("https://example.com/")
+        await db.save_scan_for_url(report, screenshot_path="data/screenshots/test.png")
+        sites = await db.get_sites()
+        page_id = sites[0]["pages"][0]["id"]
+
+        prev = await db.get_previous_scans(page_id, limit=1)
+        assert len(prev) == 1
+        assert prev[0]["screenshot_path"] == "data/screenshots/test.png"
+
+
+class TestAuthPersistence:
+    async def test_create_and_lookup_user(self, db):
+        user = await db.create_user(
+            email="Admin@Example.com",
+            password_hash="hash-1",
+            role="admin",
+        )
+
+        assert user.email == "admin@example.com"
+        found = await db.get_user_by_email("ADMIN@example.com")
+        assert found is not None
+        assert found.id == user.id
+
+    async def test_bootstrap_admin_is_idempotent(self, db):
+        first = await db.ensure_bootstrap_admin("admin@example.com", "hash-1")
+        second = await db.ensure_bootstrap_admin("admin@example.com", "hash-2")
+
+        assert first is not None
+        assert second is None
+        users = await db.list_users()
+        admins = [u for u in users if u["role"] == "admin" and u["is_active"]]
+        assert len(admins) == 1
+
+    async def test_session_lifecycle_create_revoke(self, db):
+        user = await db.create_user(
+            email="user@example.com",
+            password_hash="hash-1",
+            role="user",
+        )
+        expires_at = datetime.now(UTC)
+        auth_session = await db.create_auth_session(
+            user_id=user.id,
+            token_hash="token-hash-1",
+            expires_at=expires_at,
+            ip_address="127.0.0.1",
+            user_agent="pytest",
+        )
+
+        loaded = await db.get_auth_session("token-hash-1")
+        assert loaded is not None
+        assert loaded.id == auth_session.id
+        assert loaded.user is not None
+        assert loaded.user.id == user.id
+
+        revoked = await db.revoke_auth_session_by_hash("token-hash-1")
+        assert revoked is True
+        loaded_after = await db.get_auth_session("token-hash-1")
+        assert loaded_after is not None
+        assert loaded_after.revoked_at is not None
+
+    async def test_delete_expired_sessions(self, db):
+        user = await db.create_user(
+            email="cleanup@example.com",
+            password_hash="hash-1",
+            role="user",
+        )
+        await db.create_auth_session(
+            user_id=user.id,
+            token_hash="old-hash",
+            expires_at=datetime(2000, 1, 1, tzinfo=UTC),
+            ip_address=None,
+            user_agent=None,
+        )
+
+        removed = await db.delete_expired_auth_sessions()
+        assert removed >= 1
+        assert await db.get_auth_session("old-hash") is None

@@ -5,19 +5,19 @@ import logging
 from nicegui import app, ui
 from pydantic import ValidationError
 
-import qa_bot.ui_admin_users
-import qa_bot.ui_auth
-import qa_bot.ui_dashboard
-import qa_bot.ui_scan
-import qa_bot.ui_settings
-import qa_bot.ui_sites  # noqa: F401
-from qa_bot import state
-from qa_bot.auth import AuthService
+import qa_bot.ui.admin_users
+import qa_bot.ui.auth
+import qa_bot.ui.dashboard
+import qa_bot.ui.scan
+import qa_bot.ui.settings
+import qa_bot.ui.sites  # noqa: F401
 from qa_bot.config import _SCREENSHOTS_DIR, Settings, ensure_data_dirs
-from qa_bot.database import Database
-from qa_bot.fetcher import PlaywrightReadinessError, ensure_playwright_runtime_ready
-from qa_bot.orchestrator import QABot
-from qa_bot.scheduler import ScanScheduler
+from qa_bot.db.database import Database
+from qa_bot.services import state
+from qa_bot.services.auth import AuthService
+from qa_bot.services.fetcher import PlaywrightReadinessError, ensure_playwright_runtime_ready
+from qa_bot.services.orchestrator import QABot
+from qa_bot.services.scheduler import ScanScheduler
 
 logger = logging.getLogger(__name__)
 

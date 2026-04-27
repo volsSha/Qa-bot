@@ -4,7 +4,7 @@ import re
 
 from bs4 import BeautifulSoup, Comment, Tag
 
-from qa_bot.models import FormInfo, HeadingInfo, ImageInfo, LinkInfo, PreprocessedPage
+from qa_bot.domain.models import FormInfo, HeadingInfo, ImageInfo, LinkInfo, PreprocessedPage
 
 _REMOVE_TAGS = {"script", "style", "nav", "footer", "header", "iframe", "noscript"}
 

@@ -5,18 +5,19 @@ from typing import TYPE_CHECKING
 
 from nicegui import ui
 
-from qa_bot.models import ScanBatch
-from qa_bot.reporter import format_report_markdown
-from qa_bot.ui_helpers import (
+from qa_bot.domain.models import ScanBatch
+from qa_bot.services.auth import require_authenticated_user
+from qa_bot.services.reporter import format_report_markdown
+from qa_bot.ui.helpers import (
     find_latest_screenshot,
     parse_urls,
     score_badge,
     status_badge,
 )
-from qa_bot.ui_layout import create_layout
+from qa_bot.ui.layout import create_layout
 
 if TYPE_CHECKING:
-    from qa_bot.orchestrator import QABot
+    from qa_bot.services.orchestrator import QABot
 
 
 async def _scan(
@@ -132,9 +133,12 @@ async def _scan(
 
 @ui.page("/scan")
 async def scan_page():
+    user = await require_authenticated_user()
+    if user is None:
+        return
 
-    create_layout(active="scan")
-    from qa_bot.state import bot as _bot
+    create_layout(active="scan", user_email=user.email, is_admin=user.is_admin)
+    from qa_bot.services.state import bot as _bot
 
     bot = _bot
     if bot is None:

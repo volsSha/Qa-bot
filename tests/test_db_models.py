@@ -4,15 +4,14 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from qa_bot.db_models import Base, Page, ScanResult, Site
-from qa_bot.models import (
+from qa_bot.db.models import AuthSession, Base, Page, ScanResult, Site, User
+from qa_bot.domain.models import (
     CheckResult,
     LLMEvaluation,
     LLMFinding,
-    OverallStatus,
-    ScanReport,
     Severity,
 )
 
@@ -55,7 +54,7 @@ class TestSiteModel:
 
         async with factory() as session:
             session.add(Site(domain="example.com"))
-            with pytest.raises(Exception):
+            with pytest.raises(IntegrityError):
                 await session.commit()
 
     async def test_label_nullable(self, session):
@@ -97,7 +96,7 @@ class TestPageModel:
         async with factory() as session:
             page2 = Page(site_id=site.id, url="https://example.com/", path="/")
             session.add(page2)
-            with pytest.raises(Exception):
+            with pytest.raises(IntegrityError):
                 await session.commit()
 
     async def test_relationship_to_site(self, session):
@@ -176,7 +175,10 @@ class TestScanResultModel:
         await session.commit()
         await session.refresh(scan)
 
-        restored = [CheckResult.model_validate(r, strict=False) for r in json.loads(scan.rule_results)]
+        restored = [
+            CheckResult.model_validate(r, strict=False)
+            for r in json.loads(scan.rule_results)
+        ]
         assert len(restored) == 1
         assert restored[0].check_name == "http_status"
         assert restored[0].severity == Severity.PASS
@@ -241,3 +243,50 @@ class TestScanResultModel:
         result = await session.execute(stmt)
         rows = result.fetchall()
         assert len(rows) == 2
+
+
+class TestUserAndAuthSessionModels:
+    async def test_create_user(self, session):
+        user = User(
+            email="admin@example.com",
+            password_hash="$2b$12$examplehash",
+            role="admin",
+            is_active=True,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        assert user.id is not None
+        assert user.email == "admin@example.com"
+        assert user.role == "admin"
+        assert user.is_active is True
+
+    async def test_unique_user_email_constraint(self, engine):
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with factory() as session:
+            session.add(User(email="admin@example.com", password_hash="h1", role="admin"))
+            await session.commit()
+
+        async with factory() as session:
+            session.add(User(email="admin@example.com", password_hash="h2", role="user"))
+            with pytest.raises(IntegrityError):
+                await session.commit()
+
+    async def test_auth_session_relationship(self, session):
+        user = User(email="admin@example.com", password_hash="h", role="admin")
+        session.add(user)
+        await session.flush()
+        await session.refresh(user)
+
+        auth_session = AuthSession(
+            user_id=user.id,
+            token_hash="token-hash",
+            expires_at=datetime.now(UTC),
+        )
+        session.add(auth_session)
+        await session.commit()
+        await session.refresh(auth_session)
+
+        assert auth_session.id is not None
+        assert auth_session.user_id == user.id
