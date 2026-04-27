@@ -1,4 +1,4 @@
-from qa_bot.ui_helpers import (
+from qa_bot.ui.helpers import (
     find_latest_screenshot,
     parse_urls,
     plural,

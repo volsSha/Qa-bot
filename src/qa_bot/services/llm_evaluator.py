@@ -1,8 +1,11 @@
 import base64
+import io
 import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 
+import httpx
 import openrouter
 from openrouter.components.chatformatjsonschemaconfig import (
     ChatFormatJSONSchemaConfig,
@@ -10,6 +13,7 @@ from openrouter.components.chatformatjsonschemaconfig import (
 from openrouter.components.chatjsonschemaconfig import ChatJSONSchemaConfig
 from openrouter.components.chatsystemmessage import ChatSystemMessage
 from openrouter.components.chatusermessage import ChatUserMessage
+from PIL import Image
 from tenacity import (
     retry,
     retry_if_exception,
@@ -18,8 +22,9 @@ from tenacity import (
 )
 
 from qa_bot.config import Settings
-from qa_bot.models import (
+from qa_bot.domain.models import (
     CheckResult,
+    HistoricalContext,
     LLMEvaluation,
     LLMFinding,
     PageSnapshot,
@@ -34,11 +39,16 @@ EVALUATION_CATEGORIES = [
     "visual_anomalies",
     "placeholder_detection",
     "navigation_logic",
+    "visual_regression",
+    "layout_drift",
+    "content_consistency",
 ]
 
 SYSTEM_PROMPT = (
     "You are a QA analyst evaluating web pages. "
-    "For each category, answer whether the page passes and cite specific evidence."
+    "For each category, answer whether the page passes and cite specific evidence. "
+    "When previous screenshots are provided, compare them with the current screenshot "
+    "to detect visual regressions, layout drift, and content changes."
 )
 
 RESPONSE_JSON_SCHEMA: dict = {
@@ -72,14 +82,26 @@ RESPONSE_JSON_SCHEMA: dict = {
 
 
 def _is_retryable(exc: BaseException) -> bool:
-    import httpx
-
     if isinstance(exc, (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError)):
         return True
     return (
         isinstance(exc, httpx.HTTPStatusError)
         and (exc.response.status_code == 429 or exc.response.status_code >= 500)
     )
+
+
+def _resize_screenshot(screenshot_bytes: bytes, max_width: int) -> bytes:
+    img = Image.open(io.BytesIO(screenshot_bytes))
+    if img.width <= max_width:
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    ratio = max_width / img.width
+    new_height = int(img.height * ratio)
+    resized = img.resize((max_width, new_height))
+    buf = io.BytesIO()
+    resized.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 class LLMEvaluator:
@@ -99,6 +121,7 @@ class LLMEvaluator:
         snapshot: PageSnapshot,
         preprocessed: PreprocessedPage,
         rule_results: list[CheckResult],
+        historical_contexts: list[HistoricalContext] | None = None,
     ) -> list:
         non_pass_rules = [r for r in rule_results if r.severity != "pass"]
         rules_summary = "\n".join(
@@ -119,6 +142,10 @@ class LLMEvaluator:
                 ),
             },
             {
+                "type": "text",
+                "text": "CURRENT SCREENSHOT:",
+            },
+            {
                 "type": "image_url",
                 "image_url": {
                     "url": f"data:image/png;base64,{b64_screenshot}",
@@ -126,10 +153,65 @@ class LLMEvaluator:
             },
         ]
 
+        if historical_contexts:
+            for ctx in historical_contexts:
+                screenshot_bytes = self._load_historical_screenshot(ctx.screenshot_path)
+                if screenshot_bytes is None:
+                    continue
+                resized = _resize_screenshot(
+                    screenshot_bytes, self._settings.screenshot_history_max_width
+                )
+                b64_hist = base64.b64encode(resized).decode("ascii")
+                age_label = ""
+                if ctx.previous_scanned_at:
+                    delta = datetime.now(UTC) - ctx.previous_scanned_at
+                    if delta.days > 0:
+                        age_label = f" ({delta.days}d ago"
+                    else:
+                        hours = delta.seconds // 3600
+                        age_label = f" ({hours}h ago"
+                    if ctx.previous_health_score is not None:
+                        age_label += f", score: {ctx.previous_health_score:.0f}"
+                    age_label += ")"
+                user_content.append(
+                    {
+                        "type": "text",
+                        "text": f"PREVIOUS SCREENSHOT{age_label}:",
+                    }
+                )
+                user_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{b64_hist}",
+                        },
+                    }
+                )
+                if ctx.previous_findings_summary:
+                    user_content.append(
+                        {
+                            "type": "text",
+                            "text": f"Previous scan summary: {ctx.previous_findings_summary}",
+                        }
+                    )
+
         return [
             ChatSystemMessage(role="system", content=SYSTEM_PROMPT),
             ChatUserMessage(role="user", content=user_content),
         ]
+
+    def _load_historical_screenshot(self, screenshot_path: str | None) -> bytes | None:
+        if screenshot_path is None:
+            return None
+        path = Path(screenshot_path)
+        if not path.exists():
+            logger.warning("Historical screenshot not found: %s", screenshot_path)
+            return None
+        data = path.read_bytes()
+        if not data:
+            logger.warning("Empty screenshot file: %s", screenshot_path)
+            return None
+        return data
 
     @retry(
         retry=retry_if_exception(_is_retryable),
@@ -153,8 +235,11 @@ class LLMEvaluator:
         snapshot: PageSnapshot,
         preprocessed: PreprocessedPage,
         rule_results: list[CheckResult],
+        historical_contexts: list[HistoricalContext] | None = None,
     ) -> LLMEvaluation:
-        messages = self._build_messages(snapshot, preprocessed, rule_results)
+        messages = self._build_messages(
+            snapshot, preprocessed, rule_results, historical_contexts
+        )
 
         try:
             response = await self._call_llm(messages)

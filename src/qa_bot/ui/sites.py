@@ -5,19 +5,21 @@ from typing import TYPE_CHECKING
 
 from nicegui import ui
 
-from qa_bot.ui_helpers import (
+from qa_bot.services.auth import require_authenticated_user
+from qa_bot.ui.helpers import (
     find_latest_screenshot,
     plural,
+    regression_badge,
     score_badge,
     severity_badge,
     status_badge,
     validate_single_url,
 )
-from qa_bot.ui_layout import create_layout
+from qa_bot.ui.layout import create_layout
 
 if TYPE_CHECKING:
-    from qa_bot.orchestrator import QABot
-    from qa_bot.scheduler import ScanScheduler
+    from qa_bot.services.orchestrator import QABot
+    from qa_bot.services.scheduler import ScanScheduler
 
 _INTERVAL_OPTIONS = [
     ("None", None),
@@ -343,8 +345,18 @@ def _render_latest_scan(latest: dict) -> None:
 
     llm_eval = latest.get("llm_evaluation")
     if llm_eval:
+        findings = llm_eval.get("findings", [])
+        regression_categories = {"visual_regression", "layout_drift", "content_consistency"}
+        has_regression = any(
+            not f.get("passed", True)
+            for f in findings
+            if f.get("category") in regression_categories
+        )
+
         with ui.expansion("LLM Evaluation"):
-            findings = llm_eval.get("findings", [])
+            if has_regression:
+                ui.html(regression_badge(True)).classes("mb-2")
+
             if findings:
                 with ui.row().classes(
                     "w-full gap-0 border-b border-gray-200 dark:border-slate-700 "
@@ -355,13 +367,15 @@ def _render_latest_scan(latest: dict) -> None:
                     ui.label("Confidence").classes("w-[100px] px-2 py-1 text-center")
                     ui.label("Evidence").classes("flex-1 px-2 py-1")
                 for f in findings:
+                    cat = f.get("category", "—")
+                    row_classes = ""
+                    if cat in regression_categories and not f.get("passed", True):
+                        row_classes = "bg-orange-50 dark:bg-orange-900/20"
                     with ui.row().classes(
-                        "w-full gap-0 border-b border-gray-100 "
-                        "dark:border-slate-700/50 text-sm"
+                        f"w-full gap-0 border-b border-gray-100 "
+                        f"dark:border-slate-700/50 text-sm {row_classes}"
                     ):
-                        ui.label(f.get("category", "—")).classes(
-                            "w-[120px] px-2 py-1"
-                        )
+                        ui.label(cat).classes("w-[120px] px-2 py-1")
                         passed = f.get("passed", False)
                         ui.label("Yes" if passed else "No").classes(
                             "w-[80px] px-2 py-1 text-center "
@@ -529,7 +543,7 @@ async def _delete_page(
         if detail:
             from sqlalchemy import delete as sa_delete
 
-            from qa_bot.db_models import Page, ScanResult
+            from qa_bot.db.models import Page, ScanResult
 
             async with bot._database._async_session_factory() as session:
                 await session.execute(
@@ -565,10 +579,13 @@ async def _go_back_to_sites(
 
 @ui.page("/sites")
 async def sites_page():
+    user = await require_authenticated_user()
+    if user is None:
+        return
 
-    create_layout(active="sites")
-    from qa_bot.state import bot as _bot
-    from qa_bot.state import scheduler as _scheduler
+    create_layout(active="sites", user_email=user.email, is_admin=user.is_admin)
+    from qa_bot.services.state import bot as _bot
+    from qa_bot.services.state import scheduler as _scheduler
 
     bot = _bot
     scheduler = _scheduler

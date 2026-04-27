@@ -3,10 +3,11 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from qa_bot.models import (
+from qa_bot.domain.models import (
     CheckResult,
     FormInfo,
     HeadingInfo,
+    HistoricalContext,
     ImageInfo,
     LinkInfo,
     LLMEvaluation,
@@ -239,6 +240,47 @@ class TestEdgeCases:
             scanned_at=NOW,
         )
         assert r.llm_evaluation is None
+
+    def test_scan_report_with_screenshot_path(self):
+        r = ScanReport(
+            url="https://example.com",
+            overall_status=OverallStatus.HEALTHY,
+            health_score=90.0,
+            rule_results=[],
+            summary="Good",
+            scanned_at=NOW,
+            screenshot_path="data/screenshots/example.com_20260426_120000.png",
+        )
+        assert r.screenshot_path is not None
+
+    def test_scan_report_screenshot_path_default_none(self):
+        r = ScanReport(
+            url="https://example.com",
+            overall_status=OverallStatus.HEALTHY,
+            health_score=90.0,
+            rule_results=[],
+            summary="Good",
+            scanned_at=NOW,
+        )
+        assert r.screenshot_path is None
+
+    def test_historical_context_full(self):
+        ctx = HistoricalContext(
+            previous_findings_summary="1 warning: slow load",
+            previous_health_score=85.0,
+            previous_scanned_at=NOW,
+            screenshot_path="data/screenshots/example.com_20260425_120000.png",
+        )
+        assert ctx.previous_health_score == 85.0
+        assert ctx.screenshot_path is not None
+
+    def test_historical_context_minimal(self):
+        ctx = HistoricalContext(
+            previous_findings_summary="All checks passed.",
+        )
+        assert ctx.previous_health_score is None
+        assert ctx.previous_scanned_at is None
+        assert ctx.screenshot_path is None
 
 
 class TestErrorPaths:

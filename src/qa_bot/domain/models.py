@@ -99,6 +99,15 @@ class LLMEvaluation(BaseModel):
     evaluated_at: datetime
 
 
+class HistoricalContext(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    previous_findings_summary: str
+    previous_health_score: float | None = None
+    previous_scanned_at: datetime | None = None
+    screenshot_path: str | None = None
+
+
 class ScanReport(BaseModel):
     model_config = ConfigDict(strict=True)
 
@@ -109,6 +118,7 @@ class ScanReport(BaseModel):
     llm_evaluation: LLMEvaluation | None = None
     summary: str
     scanned_at: datetime
+    screenshot_path: str | None = None
 
 
 class ScanBatch(BaseModel):

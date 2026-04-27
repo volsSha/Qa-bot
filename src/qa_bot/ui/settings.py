@@ -4,13 +4,14 @@ from typing import TYPE_CHECKING
 
 from nicegui import ui
 
-from qa_bot.settings_manager import (
+from qa_bot.services.auth import require_authenticated_user
+from qa_bot.services.settings_manager import (
     build_new_settings,
     get_current_settings,
     get_field_definitions,
     save_settings,
 )
-from qa_bot.ui_layout import create_layout
+from qa_bot.ui.layout import create_layout
 
 if TYPE_CHECKING:
     pass
@@ -18,9 +19,12 @@ if TYPE_CHECKING:
 
 @ui.page("/settings")
 async def settings_page():
+    user = await require_authenticated_user()
+    if user is None:
+        return
 
-    create_layout(active="settings")
-    from qa_bot.state import bot as _bot
+    create_layout(active="settings", user_email=user.email, is_admin=user.is_admin)
+    from qa_bot.services.state import bot as _bot
 
     bot = _bot
 

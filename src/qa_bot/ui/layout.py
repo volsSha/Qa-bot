@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from nicegui import ui
 
-_NAV_ITEMS = [
+_BASE_NAV_ITEMS = [
     ("Dashboard", "dashboard", "/"),
     ("Scan", "search", "/scan"),
     ("Sites", "language", "/sites"),
@@ -10,8 +10,11 @@ _NAV_ITEMS = [
 ]
 
 
-def create_layout(active: str = "dashboard") -> ui.dark_mode:
+def create_layout(active: str = "dashboard", *, user_email: str, is_admin: bool) -> ui.dark_mode:
     dark = ui.dark_mode(True)
+    nav_items = list(_BASE_NAV_ITEMS)
+    if is_admin:
+        nav_items.append(("Users", "admin_panel_settings", "/admin/users"))
 
     with ui.header().classes(
         "w-full bg-white dark:bg-slate-900 shadow-sm px-6 py-3 items-center justify-between"
@@ -22,6 +25,20 @@ def create_layout(active: str = "dashboard") -> ui.dark_mode:
                 "text-xl font-bold text-slate-800 dark:text-white"
             )
         with ui.row().classes("items-center gap-2"):
+            ui.label(user_email).classes("text-sm text-slate-500 dark:text-slate-300")
+            async def _logout() -> None:
+                from qa_bot import state
+
+                auth_service = state.auth_service
+                if auth_service is None:
+                    ui.notify("Authentication is not initialized", type="negative")
+                    return
+                await auth_service.logout(ui.context.client.request)
+                ui.navigate.to("/login")
+
+            ui.button("Logout", icon="logout", on_click=_logout).props("flat no-caps").classes(
+                "text-slate-600 dark:text-slate-300"
+            )
             ui.button(icon="dark_mode", on_click=dark.toggle).props(
                 "flat round size=sm"
             ).classes("text-slate-600 dark:text-slate-300")
@@ -29,7 +46,7 @@ def create_layout(active: str = "dashboard") -> ui.dark_mode:
     with ui.left_drawer().classes(
         "bg-slate-800 dark:bg-slate-950 border-r-0"
     ).style("width: 220px"), ui.column().classes("w-full gap-0 px-2 py-4"):
-        for label, key, path in _NAV_ITEMS:
+        for label, key, path in nav_items:
             is_active = key == active
             btn_classes = (
                 "w-full text-left no-caps px-4 py-2.5 rounded-lg text-sm font-medium "

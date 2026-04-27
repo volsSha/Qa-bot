@@ -10,7 +10,27 @@ from tenacity import (
 )
 
 from qa_bot.config import Settings
-from qa_bot.models import PageSnapshot
+from qa_bot.domain.models import PageSnapshot
+
+
+class PlaywrightReadinessError(RuntimeError):
+    pass
+
+
+_PLAYWRIGHT_READINESS_HINT = (
+    "Playwright Chromium is not ready. Install browser binaries with "
+    "`playwright install chromium` and ensure required OS dependencies "
+    "are available for this runtime."
+)
+
+
+async def ensure_playwright_runtime_ready() -> None:
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            await browser.close()
+    except Exception as exc:
+        raise PlaywrightReadinessError(_PLAYWRIGHT_READINESS_HINT) from exc
 
 
 class PageFetcher:
@@ -20,6 +40,17 @@ class PageFetcher:
     async def fetch(self, url: str) -> PageSnapshot:
         try:
             return await self._fetch_with_retry(url)
+        except PlaywrightReadinessError as exc:
+            return PageSnapshot(
+                url=url,
+                html="",
+                screenshot=b"",
+                text_content="",
+                console_errors=[str(exc)],
+                load_time_ms=0,
+                status_code=0,
+                fetched_at=datetime.now(UTC),
+            )
         except Exception as exc:
             return PageSnapshot(
                 url=url,
@@ -39,7 +70,10 @@ class PageFetcher:
     )
     async def _fetch_with_retry(self, url: str) -> PageSnapshot:
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
+            try:
+                browser = await pw.chromium.launch(headless=True)
+            except Exception as exc:
+                raise PlaywrightReadinessError(_PLAYWRIGHT_READINESS_HINT) from exc
             try:
                 page = await browser.new_page(
                     viewport={"width": self._settings.screenshot_width, "height": 800}

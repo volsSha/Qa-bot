@@ -3,7 +3,7 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from qa_bot.config import _SCREENSHOTS_DIR
-from qa_bot.reporter import _url_to_filename
+from qa_bot.services.reporter import _url_to_filename
 
 _STATUS_BADGE: dict[str | None, tuple[str, str]] = {
     "healthy": (
@@ -86,3 +86,13 @@ def find_latest_screenshot(url: str) -> str | None:
     if files:
         return files[0].name
     return None
+
+
+def regression_badge(has_regression: bool) -> str:
+    if has_regression:
+        return (
+            '<span class="bg-orange-100 text-orange-800 dark:bg-orange-900 '
+            'dark:text-orange-200 px-2 py-0.5 rounded-full text-xs">'
+            'Visual change</span>'
+        )
+    return ""

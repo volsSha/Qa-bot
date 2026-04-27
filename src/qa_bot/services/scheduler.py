@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from qa_bot.orchestrator import QABot
+    from qa_bot.services.orchestrator import QABot
 
 logger = logging.getLogger(__name__)
 

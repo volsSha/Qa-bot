@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 
 from qa_bot.config import Settings
-from qa_bot.models import (
+from qa_bot.domain.models import (
     CheckResult,
     FormInfo,
     HeadingInfo,
@@ -15,7 +15,7 @@ from qa_bot.models import (
     PreprocessedPage,
     Severity,
 )
-from qa_bot.rules import (
+from qa_bot.services.rules import (
     RuleEngine,
     check_broken_images,
     check_console_errors,
