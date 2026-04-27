@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "-----> Installing Playwright system dependencies"
+playwright install-deps chromium 2>&1 || {
+  echo " ! playwright install-deps failed (non-fatal, continuing)"
+}
+
+echo "-----> Installing Playwright Chromium browser"
+playwright install chromium 2>&1 || {
+  echo " ! playwright install chromium failed"
+  exit 1
+}
+
+echo "-----> Playwright post_compile done"
