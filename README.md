@@ -21,13 +21,13 @@ QA Bot scans web pages using a headless browser, runs 10 built-in quality rules 
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
-### Scan
-
-![Scan](docs/screenshots/scan.png)
+![Dashboard - Live on Heroku](docs/screenshots/dashboard-heroku.png)
 
 ### Sites
 
 ![Sites](docs/screenshots/sites.png)
+
+![Sites - Live on Heroku](docs/screenshots/sites-heroku.png)
 
 ### Settings
 
