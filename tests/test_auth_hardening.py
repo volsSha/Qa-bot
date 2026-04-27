@@ -70,6 +70,25 @@ class TestAuthHardening:
         assert ok3 is False
         assert message3 == "Too many failed login attempts. Try again later."
 
+    async def test_successful_login_clears_prior_failures_for_identity(self, auth_stack):
+        service, _ = auth_stack
+        request = _DummyRequest()
+
+        ok1, message1 = await service.login(request, "admin@example.com", "wrong")
+        ok2, message2 = await service.login(
+            request,
+            "admin@example.com",
+            "correct horse battery staple",
+        )
+        ok3, message3 = await service.login(request, "admin@example.com", "wrong")
+
+        assert ok1 is False
+        assert message1 == "Invalid email or password"
+        assert ok2 is True
+        assert message2 == "ok"
+        assert ok3 is False
+        assert message3 == "Invalid email or password"
+
     async def test_expired_session_is_rejected(self, auth_stack):
         service, database = auth_stack
         request = _DummyRequest()

@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs
 
 import bcrypt
-from nicegui import ui
+from nicegui import app, ui
+from starlette.requests import Request
+from starlette.responses import RedirectResponse
 
 from qa_bot.config import Settings
 from qa_bot.db.database import Database
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -108,15 +114,39 @@ class AuthService:
         keys = self._identity_keys(email, ip)
 
         if self._is_rate_limited(keys, now):
+            logger.info(
+                "Login rejected: rate_limited ip_present=%s email_hash=%s",
+                bool(ip),
+                self._identity_hash(email),
+            )
             return False, "Too many failed login attempts. Try again later."
 
         normalized_email = email.strip().lower()
         user = await self._database.get_user_by_email(normalized_email)
-        if user is None or not user.is_active:
+        if user is None:
+            logger.info(
+                "Login rejected: unknown_user ip_present=%s email_hash=%s",
+                bool(ip),
+                self._identity_hash(normalized_email),
+            )
+            self._record_failure(keys, now)
+            return False, "Invalid email or password"
+
+        if not user.is_active:
+            logger.info(
+                "Login rejected: inactive user_id=%s ip_present=%s",
+                user.id,
+                bool(ip),
+            )
             self._record_failure(keys, now)
             return False, "Invalid email or password"
 
         if not self.verify_password(password, user.password_hash):
+            logger.info(
+                "Login rejected: password_mismatch user_id=%s ip_present=%s",
+                user.id,
+                bool(ip),
+            )
             self._record_failure(keys, now)
             return False, "Invalid email or password"
 
@@ -136,7 +166,15 @@ class AuthService:
 
         request.session["auth_session_token"] = token
         request.session["auth_session_started_at"] = now.isoformat()
+        logger.info(
+            "Login accepted: user_id=%s ip_present=%s",
+            user.id,
+            bool(ip),
+        )
         return True, "ok"
+
+    def _identity_hash(self, email: str) -> str:
+        return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()[:12]
 
     async def logout(self, request) -> None:
         token = request.session.get("auth_session_token")
@@ -217,3 +255,25 @@ async def require_authenticated_user(admin_only: bool = False) -> AuthenticatedU
         return None
 
     return user
+
+
+def register_auth_routes(auth_service: AuthService) -> None:
+    @app.post("/auth/login")
+    async def _login(request: Request) -> RedirectResponse:
+        return await login_form_response(auth_service, request)
+
+
+async def login_form_response(auth_service: AuthService, request: Request) -> RedirectResponse:
+    body = (await request.body()).decode("utf-8")
+    form = parse_qs(body, keep_blank_values=True)
+    ok, message = await auth_service.login(
+        request=request,
+        email=form.get("email", [""])[0],
+        password=form.get("password", [""])[0],
+    )
+
+    if ok:
+        return RedirectResponse("/", status_code=303)
+    if message == "Too many failed login attempts. Try again later.":
+        return RedirectResponse("/login?error=rate_limited", status_code=303)
+    return RedirectResponse("/login?error=invalid", status_code=303)

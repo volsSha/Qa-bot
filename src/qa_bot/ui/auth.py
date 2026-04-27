@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import parse_qs
+
 from nicegui import ui
 
 from qa_bot import state
@@ -18,6 +20,8 @@ async def login_page() -> None:
         ui.navigate.to("/")
         return
 
+    query = parse_qs(request.url.query)
+
     with ui.column().classes(
         "w-full min-h-screen items-center justify-center px-4"
     ), ui.card().classes("w-full max-w-md p-6"):
@@ -25,24 +29,29 @@ async def login_page() -> None:
         ui.label("Sign in to access the dashboard").classes(
             "text-sm text-slate-500 mb-4"
         )
-        email_input = ui.input("Email").props("type=email outlined").classes("w-full")
-        password_input = ui.input(
-            "Password",
-            password=True,
-            password_toggle_button=True,
-        ).props("outlined").classes("w-full")
-
-        async def _submit() -> None:
-            ok, message = await auth_service.login(
-                request=request,
-                email=email_input.value or "",
-                password=password_input.value or "",
+        if query.get("error") == ["invalid"]:
+            ui.label("Invalid email or password").classes("text-sm text-red-600 mb-2")
+        elif query.get("error") == ["rate_limited"]:
+            ui.label("Too many failed login attempts. Try again later.").classes(
+                "text-sm text-red-600 mb-2"
             )
-            if ok:
-                ui.navigate.to("/")
-                return
-            ui.notify(message, type="negative")
 
-        ui.button("Login", on_click=_submit, icon="login").props("color=primary").classes(
-            "w-full mt-3"
+        ui.html(
+            """
+            <form action="/auth/login" method="post" class="w-full flex flex-col gap-4">
+              <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+                Email
+                <input name="email" type="email" aria-label="Email" required
+                  autocomplete="username" class="q-field__native rounded border px-3 py-2">
+              </label>
+              <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+                Password
+                <input name="password" type="password" aria-label="Password" required
+                  autocomplete="current-password" class="q-field__native rounded border px-3 py-2">
+              </label>
+              <button type="submit" class="bg-primary text-white rounded px-4 py-2 w-full mt-3">
+                Login
+              </button>
+            </form>
+            """,
         )

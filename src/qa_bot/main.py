@@ -14,7 +14,7 @@ import qa_bot.ui.sites  # noqa: F401
 from qa_bot.config import _SCREENSHOTS_DIR, Settings, ensure_data_dirs
 from qa_bot.db.database import Database
 from qa_bot.services import state
-from qa_bot.services.auth import AuthService
+from qa_bot.services.auth import AuthService, register_auth_routes
 from qa_bot.services.fetcher import PlaywrightReadinessError, ensure_playwright_runtime_ready
 from qa_bot.services.orchestrator import QABot
 from qa_bot.services.scheduler import ScanScheduler
@@ -32,6 +32,7 @@ def main() -> None:
 
     database = Database(settings)
     auth_service = AuthService(settings=settings, database=database)
+    register_auth_routes(auth_service)
 
     app.add_static_files("/screenshots", str(_SCREENSHOTS_DIR))
 
